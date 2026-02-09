@@ -1,29 +1,30 @@
-import http.server
-import http.server
-import socketserver
-import threading
 import os
 import time
+import threading
+import http.server
+import socketserver
 
-# 1. Функция-заглушка для Render (чтобы он видел активный порт)
-def run_server():
-    # Берем порт, который дает Render, или 8080 по умолчанию
+# 1. Заглушка для Render (чтобы сервис был "Live")
+def start_web_server():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
-    # Позволяем повторное использование порта, чтобы не было ошибок при перезагрузке
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"--- SERVER STARTED ON PORT {port} ---")
         httpd.serve_forever()
 
-# 2. Запускаем сервер в фоновом потоке
-threading.Thread(target=run_server, daemon=True).start()
+threading.Thread(target=start_web_server, daemon=True).start()
 
-# 3. Твое сообщение, которое мы будем искать в логах
-print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО И РАБОТАЕТ ---")
+# 2. Твоя "Виртуальная рука" (Логика управления)
+print("--- ВИРТУАЛЬНАЯ РУКА ААРОНА ЗАПУЩЕНА ---")
+print("Ожидание команды на регистрацию...")
 
-# 4. Бесконечный цикл, чтобы бот не выключался
+def virtual_hand_action(command):
+    if "register" in command:
+        print("Робот заходит на my.telegram.org...")
+        # Тут будет код для автоматического ввода номера
+        print("Запрос кода подтверждения отправлен на телефон Аарона.")
+
+# 3. Бесконечный цикл работы
 while True:
-    # Здесь позже будет логика поиска заказов
-    time.sleep(60)
-
+    # Здесь бот будет проверять твои команды из Телеграм
+    time.sleep(10)
