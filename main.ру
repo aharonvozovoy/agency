@@ -1,22 +1,29 @@
 import http.server
+import http.server
 import socketserver
 import threading
 import os
+import time
 
+# 1. Функция-заглушка для Render (чтобы он видел активный порт)
 def run_server():
-    # Render сам назначит порт, мы его просто подхватим
+    # Берем порт, который дает Render, или 8080 по умолчанию
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
+    # Позволяем повторное использование порта, чтобы не было ошибок при перезагрузке
+    socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"--- СЕРВЕР ПРИНЯЛ ПОРТ {port} ---")
+        print(f"--- SERVER STARTED ON PORT {port} ---")
         httpd.serve_forever()
 
-# Запускаем «ответчик» для Render
+# 2. Запускаем сервер в фоновом потоке
 threading.Thread(target=run_server, daemon=True).start()
 
-# Твой победный текст
+# 3. Твое сообщение, которое мы будем искать в логах
 print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО И РАБОТАЕТ ---")
 
-import time
+# 4. Бесконечный цикл, чтобы бот не выключался
 while True:
-    time.sleep(10)
+    # Здесь позже будет логика поиска заказов
+    time.sleep(60)
+
