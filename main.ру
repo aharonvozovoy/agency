@@ -1,22 +1,22 @@
 import http.server
 import socketserver
 import threading
+import os
 
 def run_server():
-    # Этот кусок кода «обманет» Render, открыв нужный ему порт
-    PORT = 8080
+    # Render сам назначит порт, мы его просто подхватим
+    port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", PORT), handler) as httpd:
-        print(f"--- СЕРВЕР ЗАПУЩЕН НА ПОРТУ {PORT} ---")
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        print(f"--- СЕРВЕР ПРИНЯЛ ПОРТ {port} ---")
         httpd.serve_forever()
 
-# Запускаем «ответчик» в отдельном потоке
+# Запускаем «ответчик» для Render
 threading.Thread(target=run_server, daemon=True).start()
 
-# А это — твое агентство
+# Твой победный текст
 print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО И РАБОТАЕТ ---")
 
-# Чтобы программа не закрывалась
 import time
 while True:
     time.sleep(10)
