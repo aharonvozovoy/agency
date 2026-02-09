@@ -1,30 +1,22 @@
 import os
 import time
 import threading
-import http.server
-import socketserver
+from http.server import SimpleHTTPRequestHandler, HTTPServer
 
-# 1. Заглушка для Render (чтобы сервис был "Live")
-def start_web_server():
+# 1. Оживляем сервер для Render
+def run_static_server():
     port = int(os.environ.get("PORT", 8080))
-    handler = http.server.SimpleHTTPRequestHandler
-    socketserver.TCPServer.allow_reuse_address = True
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        httpd.serve_forever()
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, SimpleHTTPRequestHandler)
+    print(f"--- ВИРТУАЛЬНАЯ РУКА ОЖИЛА НА ПОРТУ {port} ---")
+    httpd.serve_forever()
 
-threading.Thread(target=start_web_server, daemon=True).start()
+threading.Thread(target=run_static_server, daemon=True).start()
 
-# 2. Твоя "Виртуальная рука" (Логика управления)
-print("--- ВИРТУАЛЬНАЯ РУКА ААРОНА ЗАПУЩЕНА ---")
-print("Ожидание команды на регистрацию...")
+# 2. Логика будущей автоматизации
+print("Бот запущен. Ожидание разблокировки my.telegram.org...")
+print("Аарон, как только блокировка спадет, я помогу тебе вытащить ключи.")
 
-def virtual_hand_action(command):
-    if "register" in command:
-        print("Робот заходит на my.telegram.org...")
-        # Тут будет код для автоматического ввода номера
-        print("Запрос кода подтверждения отправлен на телефон Аарона.")
-
-# 3. Бесконечный цикл работы
 while True:
-    # Здесь бот будет проверять твои команды из Телеграм
-    time.sleep(10)
+    # Здесь будет цикл, который мониторит заказы
+    time.sleep(60)
