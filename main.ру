@@ -1,16 +1,22 @@
+import http.server
+import socketserver
+import threading
+
+def run_server():
+    # Этот кусок кода «обманет» Render, открыв нужный ему порт
+    PORT = 8080
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", PORT), handler) as httpd:
+        print(f"--- СЕРВЕР ЗАПУЩЕН НА ПОРТУ {PORT} ---")
+        httpd.serve_forever()
+
+# Запускаем «ответчик» в отдельном потоке
+threading.Thread(target=run_server, daemon=True).start()
+
+# А это — твое агентство
+print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО И РАБОТАЕТ ---")
+
+# Чтобы программа не закрывалась
 import time
-
-def search_money():
-    # Наша база потенциальных заказов (для теста)
-    return [
-        {"task": "Аудит систем яхты 50ft", "budget": 20000},
-        {"task": "Диагностика двигателя", "budget": 8000}
-    ]
-
-if __name__ == "__main__":
-    print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО ---")
-    while True:
-        jobs = search_money()
-        for job in jobs:
-            print(f"ОБЪЕКТ: {job['task']} | Прибыль: {job['budget']*0.3} THB")
-        time.sleep(60)
+while True:
+    time.sleep(10)
