@@ -1,45 +1,38 @@
 import os
-import subprocess
-import sys
 import asyncio
-import threading
-from http.server import SimpleHTTPRequestHandler, HTTPServer
-
-# Установка библиотек прямо в облаке
-def install_tools():
-    try:
-        import telethon
-    except ImportError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "telethon"])
-
-install_tools()
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 
-# 1. Веб-сервер для Render (чтобы не засыпал)
-def run_port():
-    port = int(os.environ.get("PORT", 8080))
-    HTTPServer(('', port), SimpleHTTPRequestHandler).serve_forever()
-
-threading.Thread(target=run_port, daemon=True).start()
-
-# 2. Твои боевые ключи
+# Твои данные из прошлых чатов
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
+# Эту переменную мы только что добавили в Render
+SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
 
-# 3. Настройка клиента
-client = TelegramClient('aharon_session', API_ID, API_HASH)
+client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+
+# Список слов-маячков для поиска бабок (арбитража)
+KEYWORDS = ['нужен', 'заказ', 'дизайн', 'логотип', 'сайт', 'верстка', 'сделать']
+
+@client.on(events.NewMessage)
+async def handler(event):
+    text = event.raw_text.lower()
+    # Проверяем на ключевые слова
+    if any(word in text for word in KEYWORDS):
+        # Отправляем тебе в "Избранное"
+        chat_info = f"Чат: {event.chat.title}" if event.chat else "Личка"
+        link = f"https://t.me/c/{event.chat_id}/{event.id}" if event.chat_id else "Нет ссылки"
+        
+        await client.send_message('me', 
+            f"💰 **НАЙДЕН ЗАКАЗ!**\n\n"
+            f"📍 {chat_info}\n"
+            f"📝 {event.raw_text[:300]}...\n\n"
+            f"🔗 {link}\n"
+            f"📈 *Напоминание: донат 10% на развитие системы!*")
 
 async def main():
-    print("--- СИСТЕМА ЗАПУСКАЕТСЯ... ---")
-    # Бот попросит ввести телефон и код ПРЯМО В ЛОГАХ RENDER
-    await client.start() 
-    print("--- ПОДКЛЮЧЕНО! ВИРТУАЛЬНАЯ РУКА В СЕТИ ---")
-    
-    @client.on(events.NewMessage)
-    async def handler(event):
-        # Тут будет логика поиска твоих 10% прибыли
-        pass
-
+    await client.start()
+    print("✅ СИСТЕМА ЗАПУЩЕНА. МОНИТОРИНГ ИДЕТ...")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
