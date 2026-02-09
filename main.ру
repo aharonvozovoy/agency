@@ -1,0 +1,16 @@
+import time
+
+def search_money():
+    # Наша база потенциальных заказов (для теста)
+    return [
+        {"task": "Аудит систем яхты 50ft", "budget": 20000},
+        {"task": "Диагностика двигателя", "budget": 8000}
+    ]
+
+if __name__ == "__main__":
+    print("--- АГЕНТСТВО ААРОНА ЗАПУЩЕНО ---")
+    while True:
+        jobs = search_money()
+        for job in jobs:
+            print(f"ОБЪЕКТ: {job['task']} | Прибыль: {job['budget']*0.3} THB")
+        time.sleep(60)
