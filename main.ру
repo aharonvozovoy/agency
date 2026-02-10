@@ -1,80 +1,85 @@
 import os
 import asyncio
-import datetime
 import threading
+import re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telethon import TelegramClient, events
 from neonize.client import NewClient
 from neonize.events import MessageEv
 
-# --- 1. ФИКТИВНЫЙ СЕРВЕР ДЛЯ RENDER (Убирает ошибку порта) ---
+# --- 1. СЕРВЕР ДЛЯ RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is Live")
+        self.wfile.write(b"Aaron is Back to Normal")
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
 
-# --- 2. НАСТРОЙКИ И СТАТИСТИКА ---
-API_ID = os.environ.get('API_ID')
-API_HASH = os.environ.get('API_HASH')
-PHONE = os.environ.get('PHONE_NUMBER') # Для WhatsApp
+# --- 2. НАСТРОЙКИ (ТВОИ КЛЮЧИ) ---
+API_ID = 30893125 
+API_HASH = '5c73de68f3152f0513292cb495071e0b'
+PHONE = os.environ.get('PHONE_NUMBER', '66618169428')
 
-tg_client = TelegramClient('aaron_session', int(API_ID) if API_ID else 0, API_HASH)
-stats = {"deals_count": 0, "total_value": 0}
+tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
+wa_client = NewClient("db.sqlite3")
 
-# --- 3. УМНЫЙ АНАЛИЗ ДЕНЕГ ---
-def analyze_deal(text):
-    text = text.lower()
-    # Твой прайс-лист для анализа сделок
-    prices = {"pcx": 500, "nmax": 500, "forza": 1000, "xmax": 1000, "click": 300}
-    for item, price in prices.items():
-        if item in text:
-            stats["total_value"] += price
-            stats["deals_count"] += 1
-            return f"💰 Сделка: ~{price} THB ({item})"
-    if any(word in text for word in ['price', 'сколько', 'цена', 'rent']):
-        return "💳 КОММЕРЧЕСКИЙ ЗАПРОС"
-    return "🗣 ОБЩИЙ ВОПРОС"
+# --- 3. СТАТИСТИКА (Точки + Деньги + Сообщения) ---
+stats = {
+    "tg_in": 0, "wa_in": 0,
+    "dots_count": 0,
+    "money_thb": 0, "money_usd": 0
+}
 
-# --- 4. ОБРАБОТЧИК WHATSAPP ---
+def get_ai_level():
+    total = stats["tg_in"] + stats["wa_in"]
+    if total < 15: return "Уровень 1: База"
+    if total < 50: return "Уровень 2: Аналитик"
+    return "Уровень 3: Максимум ИИ"
+
+# --- 4. ОБРАБОТЧИКИ ---
+@wa_client.event(MessageEv)
 def on_wa_message(client, message: MessageEv):
     if not message.Info.FromMe:
-        msg_text = message.Message.conversation or ""
-        sender = message.Info.PushName or "Клиент WA"
-        status = analyze_deal(msg_text)
-        print(f"--- WHATSAPP ANALYTICS ---\nUser: {sender}\nStatus: {status}\nText: {msg_text}")
+        stats["wa_in"] += 1
+        text = (message.Message.conversation or "").lower()
+        # Поиск денег
+        stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
+        stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
+    elif message.Info.FromMe and message.Message.conversation == ".":
+        stats["dots_count"] += 1
 
-wa_client = NewClient("db.sqlite3")
-wa_client.event_handler.register(MessageEv, on_wa_message)
-
-# --- 5. ОБРАБОТЧИК TELEGRAM ---
 @tg_client.on(events.NewMessage)
-async def tg_handler(event):
+async def on_tg_message(event):
     if not event.out and event.is_private:
-        status = analyze_deal(event.raw_text)
-        report = f"🕵️ **АНАЛИЗ TG**\n📈 {status}\n📝 {event.raw_text[:60]}..."
-        await tg_client.send_message('me', report)
-    elif event.out and '.' in event.raw_text:
-        await event.respond("Аарон анализирует... (ИИ скоро будет подключен)")
+        stats["tg_in"] += 1
+        text = event.raw_text.lower()
+        stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
+        stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
+    
+    elif event.out and event.raw_text == ".":
+        stats["dots_count"] += 1
+        await event.delete()
+        
+        report = (
+            f"📈 **ОТЧЕТ ААРОНА**\n"
+            f"🧠 {get_ai_level()}\n"
+            f"📍 Твоих точек: {stats['dots_count']}\n"
+            f"💬 Сообщения: {stats['tg_in'] + stats['wa_in']}\n"
+            f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD"
+        )
+        await event.respond(report)
 
-# --- 6. ЗАПУСК ВСЕГО ---
+# --- 5. ЗАПУСК ---
 async def main():
-    # Запускаем веб-сервер в отдельном потоке
     threading.Thread(target=run_health_server, daemon=True).start()
-    
     await tg_client.start()
-    
-    # Запуск WhatsApp сопряжения
     if not wa_client.is_connected():
-        print(f"ПОДКЛЮЧЕНИЕ WHATSAPP ДЛЯ НОМЕРА: {PHONE}")
-        # Код сопряжения появится в логах Render!
-    
-    print("AARON SYSTEM: ПОЛНЫЙ ЗАПУСК")
+        print(f"📲 КОД ДЛЯ {PHONE}:")
+        wa_client.pair_phone(PHONE)
     await tg_client.run_until_disconnected()
 
 if __name__ == '__main__':
