@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from groq import Groq
 
-# --- СЕРВЕР LIVE ---
+# --- СЕРВЕР LIVE ДЛЯ RENDER ---
 def run_health_check():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
@@ -24,32 +24,29 @@ GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
 ai_client = Groq(api_key=GROQ_KEY)
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
-dialog_history = {}
 
-# Твой секретный знак для активации бота в личке
-BOT_TRIGGER = "😉" 
+# ТВОЙ СЕКРЕТНЫЙ ЗНАК (в любом месте сообщения)
+BOT_TRIGGER = "..." 
 
-# Инструкции для ИИ
-WORK_PROMPT = "Ты — Аарон. Услуги: рыбалка, трансферы, байки. Пиши кратко, дружелюбно, со смайликами. Закрывай клиента на встречу или созвон."
-GIRLS_PROMPT = "Ты — харизматичный Аарон. Услуги: сопровождение, ужин, прогулки. Пиши галантно, с легким флиртом 😉. Твоя цель — договориться о встрече."
+# ИНСТРУКЦИИ ДЛЯ ИИ (Деловой стиль Паттайи)
+WORK_PROMPT = "Ты — Аарон, эксперт в Паттайе. Твои темы: рыбалка, трансферы, байки, визы. Отвечай кратко, профессионально, без лишних смайлов. Цель — договориться о деталях или встрече."
+GIRLS_PROMPT = "Ты — харизматичный Аарон. Тема: компания, ужины, прогулки. Отвечай галантно и уверенно. Цель — назначить встречу."
 
-async def get_ai_response(user_id, user_text, is_girl_request, history_context=None):
-    prompt = GIRLS_PROMPT if is_girl_request else WORK_PROMPT
-    
-    # Формируем контекст из последних сообщений для связности
+async def get_ai_response(user_text, is_girl, history):
+    prompt = GIRLS_PROMPT if is_girl else WORK_PROMPT
     messages = [{"role": "system", "content": prompt}]
-    if history_context:
-        for msg in history_context:
-            role = "assistant" if msg.out else "user"
-            messages.append({"role": role, "content": msg.text})
     
-    messages.append({"role": "user", "content": user_text})
+    # Добавляем историю для понимания контекста
+    for msg in history:
+        role = "assistant" if msg.out else "user"
+        if msg.text and BOT_TRIGGER not in msg.text: # Не кормим ИИ самим триггером
+            messages.append({"role": role, "content": msg.text})
     
     try:
         completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=messages)
         return completion.choices[0].message.content
     except:
-        return "Давай в личке обсудим, так удобнее будет! ;)"
+        return "Давайте обсудим детали, я на связи."
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -57,41 +54,43 @@ async def handler(event):
         sender = await event.get_sender()
         if not sender: return
         text = event.raw_text
-        
-        # 1. Работа в группах (Ловля лидов)
+
+        # 1. ГРУППЫ: Ловим новых клиентов
         if not event.is_private:
-            is_girl = any(w in text.lower() for w in ['ужин', 'составить компанию', 'вечер'])
-            is_work = any(w in text.lower() for w in ['рыбалка', 'такси', 'байк', 'виза'])
+            is_work = any(w in text.lower() for w in ['рыбалка', 'такси', 'байк', 'виза', 'трансфер'])
+            is_girl = any(w in text.lower() for w in ['компания', 'ужин', 'вечер', 'прогулка'])
             
-            if (is_girl or is_work) and len(text) < 300:
-                ai_reply = await get_ai_response(sender.id, text, is_girl)
-                await asyncio.sleep(3)
+            if (is_work or is_girl) and "..." not in text:
+                ai_reply = await get_ai_response(text, is_girl, [])
+                await asyncio.sleep(2)
                 await event.reply(ai_reply)
 
-        # 2. Умная личка (Перехват диалога)
+        # 2. ЛИЧКА: Твое управление через "..."
         elif event.is_private:
-            # Если ТЫ отправил смайлик-триггер
-            if event.out and text.strip() == BOT_TRIGGER:
-                # Берем последние 5 сообщений для контекста
-                history = await client.get_messages(event.chat_id, limit=5)
-                # Определяем тип клиента по контексту
-                is_girl = any("💎" in m.text for m in history if m.out)
+            # Если ТЫ написал сообщение с "..."
+            if event.out and BOT_TRIGGER in text:
+                # Берем последние 10 сообщений, чтобы ИИ понимал, о чем речь
+                history = await client.get_messages(event.chat_id, limit=10)
                 
-                ai_reply = await get_ai_response(sender.id, "Продолжи диалог за меня", is_girl, history[::-1])
-                await asyncio.sleep(2)
+                # Проверяем, не девушка ли это (по тегам в истории или ключевым словам)
+                is_girl_context = any("💎" in m.text for m in history if m.out)
+                
+                ai_reply = await get_ai_response("Продолжи диалог", is_girl_context, history[::-1])
+                await asyncio.sleep(2) # Пауза для естественности
                 await event.respond(ai_reply)
             
-            # Если пишет КЛИЕНТ (бот уведомляет тебя)
+            # Если пишет КЛИЕНТ (уведомляем тебя в Избранное)
             elif not event.out:
                 user_link = f"https://t.me/{sender.username}" if hasattr(sender, 'username') and sender.username else f"tg://user?id={sender.id}"
-                await client.send_message('me', f"📩 **НОВОЕ В ЛИЧКЕ!**\n👤: {sender.first_name}\n💬: {text}\n\n🔗 {user_link}")
+                tag = "🛠 ЗАКАЗ" if "байк" in text.lower() or "такси" in text.lower() else "📩 ЛИЧКА"
+                await client.send_message('me', f"🔥 **{tag}: ОТВЕТ!**\n👤: {sender.first_name}\n💬: {text}\n\n🔗 {user_link}")
 
     except Exception as e:
         print(f"Ошибка: {e}")
 
 async def main():
     await client.start()
-    print("🚀 ГИБРИДНЫЙ БОТ С ПЕРЕХВАТОМ ЗАПУЩЕН")
+    print("🚀 ГИБРИДНЫЙ БОТ (ТРИГГЕР '...') ЗАПУЩЕН")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
