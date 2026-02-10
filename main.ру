@@ -1,3 +1,4 @@
+import telethon  # Добавь это первой строкой
 import os
 import asyncio
 import threading
