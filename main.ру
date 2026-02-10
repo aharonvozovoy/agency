@@ -7,20 +7,26 @@ import imaplib
 import smtplib
 import email
 import time
-import requests  # Для Whapi
+import requests
 from email.mime.text import MIMEText
+
+# Импортируем телетон правильно, чтобы не было NameError
 import telethon
 from telethon import TelegramClient, events, errors
+
 from groq import Groq
 
-# --- 1. HEALTH CHECK ---
+# --- 1. HEALTH CHECK ДЛЯ RENDER ---
 def run_health_check():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
+    socketserver.TCPServer.allow_reuse_address = True
     try:
         with socketserver.TCPServer(("", port), handler) as httpd:
+            print(f"Health check on port {port}")
             httpd.serve_forever()
-    except: pass
+    except Exception as e:
+        print(f"Health check error: {e}")
 
 threading.Thread(target=run_health_check, daemon=True).start()
 
@@ -29,18 +35,17 @@ API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
 GROQ_KEY = os.environ.get('GROQ_API_KEY')
-WHAPI_TOKEN = os.environ.get('WHAPI_TOKEN')
-WHAPI_URL = "https://gate.whapi.cloud/messages/text"
+WHAPI_TOKEN = os.environ.get('WHAPI_TOKEN') # Тот самый токен со скрина
 
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
 
 ai_client = Groq(api_key=GROQ_KEY)
-tg_client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+tg_client = TelegramClient(telethon.sessions.StringSession(SESSION_STR), API_ID, API_HASH)
 
 dialog_history = {}
 
-# --- 3. ИИ ЛОГИКА ---
+# --- 3. ЛОГИКА И ПРОМПТЫ ---
 WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт']
 GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'прогулка', 'ужин', 'вечер']
 
@@ -54,57 +59,87 @@ async def get_ai_response(user_id, user_text):
     
     if user_id not in dialog_history:
         dialog_history[user_id] = [{"role": "system", "content": prompt}]
+    
     dialog_history[user_id].append({"role": "user", "content": user_text})
     
     try:
-        completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=dialog_history[user_id])
-        return completion.choices[0].message.content, is_girl
-    except:
-        return "Привет! Готов обсудить детали.", is_girl
+        completion = ai_client.chat.completions.create(
+            model="llama3-8b-8192", 
+            messages=dialog_history[user_id]
+        )
+        ai_text = completion.choices[0].message.content
+        return ai_text, is_girl
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "Привет! Давайте обсудим детали в личке.", is_girl
 
 # --- 4. WHATSAPP (WHAPI) ---
 def wa_loop():
-    if not WHAPI_TOKEN: return
-    print("📲 WhatsApp (Whapi) запущен")
+    if not WHAPI_TOKEN:
+        print("WA: No Token")
+        return
+    
+    print("📲 WhatsApp (Whapi) Monitoring Started")
     last_msg_id = None
+    headers = {"Authorization": f"Bearer {WHAPI_TOKEN}"}
+    
     while True:
         try:
-            # Получаем входящие (упрощенно через get messages)
-            headers = {"Authorization": f"Bearer {WHAPI_TOKEN}"}
+            # Проверяем новые сообщения
             r = requests.get("https://gate.whapi.cloud/messages?limit=1", headers=headers).json()
             if 'messages' in r and r['messages']:
                 msg = r['messages'][0]
-                if msg['from_me'] or msg['id'] == last_msg_id: continue
-                last_msg_id = msg['id']
+                # Пропускаем свои сообщения и уже обработанные
+                if msg.get('from_me') or msg.get('id') == last_msg_id:
+                    time.sleep(3)
+                    continue
                 
-                chat_id = msg['chat_id']
-                text = msg.get('text', {}).get('body', '')
+                last_msg_id = msg.get('id')
+                chat_id = msg.get('chat_id')
+                text = msg.get('text', {}).get('body')
+
                 if text:
-                    reply, _ = asyncio.run(get_ai_response(chat_id, text))
-                    requests.post(WHAPI_URL, json={"to": chat_id, "body": reply}, headers=headers)
-        except: pass
+                    reply_text, _ = asyncio.run(get_ai_response(chat_id, text))
+                    requests.post(
+                        "https://gate.whapi.cloud/messages/text",
+                        json={"to": chat_id, "body": reply_text},
+                        headers=headers
+                    )
+        except Exception as e:
+            print(f"WA Error: {e}")
         time.sleep(5)
 
 # --- 5. GMAIL ---
 def email_loop():
-    if not EMAIL_USER: return
-    print("📧 Gmail запущен")
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("Email: No Credentials")
+        return
+    
+    print("📧 Gmail Monitoring Started")
     while True:
         try:
             mail = imaplib.IMAP4_SSL("imap.gmail.com")
             mail.login(EMAIL_USER, EMAIL_PASS)
             mail.select("inbox")
             _, data = mail.search(None, 'UNSEEN')
+            
             for num in data[0].split():
                 _, msg_data = mail.fetch(num, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
                 sender = email.utils.parseaddr(msg['From'])[1]
-                reply_text, _ = asyncio.run(get_ai_response(sender, msg['Subject'] or ""))
+                subject = msg.get('Subject', '')
+                
+                reply_text, _ = asyncio.run(get_ai_response(sender, subject))
+                
                 with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
                     smtp.login(EMAIL_USER, EMAIL_PASS)
-                    res = MIMEText(reply_text); res['Subject'] = "Re: "+(msg['Subject'] or ""); res['To'] = sender; res['From'] = EMAIL_USER
+                    res = MIMEText(reply_text)
+                    res['Subject'] = f"Re: {subject}"
+                    res['To'] = sender
+                    res['From'] = EMAIL_USER
                     smtp.sendmail(EMAIL_USER, sender, res.as_string())
-        except: pass
+        except Exception as e:
+            print(f"Email Error: {e}")
         time.sleep(30)
 
 # --- 6. TELEGRAM ---
@@ -115,13 +150,18 @@ async def handle_tg(event):
         sender = await event.get_sender()
         reply, is_girl = await get_ai_response(sender.id, event.raw_text)
         await event.respond(reply)
+        
         tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
         await tg_client.send_message('me', f"🔥 {tag}\n👤: {sender.first_name}\n💬: {event.raw_text}")
-    except errors.rpcerrorlist.SlowModeWaitError: pass
-    except Exception as e: print(f"TG Error: {e}")
+    except errors.rpcerrorlist.SlowModeWaitError:
+        print("Slow mode active")
+    except Exception as e:
+        print(f"TG Error: {e}")
 
+# --- 7. ЗАПУСК ---
 if __name__ == '__main__':
     threading.Thread(target=wa_loop, daemon=True).start()
     threading.Thread(target=email_loop, daemon=True).start()
+    print("🚀 Bot Starting...")
     tg_client.start()
     tg_client.run_until_disconnected()
