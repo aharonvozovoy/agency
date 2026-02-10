@@ -141,7 +141,7 @@ async def handle_tg(event):
         
         tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
         await tg_client.send_message('me', f"🔥 **{tag}**\n👤: {sender.first_name}\n💬: {event.raw_text}")
-    except telethon.errors.rpcerrorlist.SlowModeWaitError:
+    except errors.rpcerrorlist.SlowModeWaitErrorSlowModeWaitError:
         print("⚠️ В чате медленный режим, пропускаю...")
     except Exception as e:
         print(f"Ошибочка: {e}")
