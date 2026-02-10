@@ -150,9 +150,20 @@ async def handle_tg(event):
         sender = await event.get_sender()
         reply, is_girl = await get_ai_response(sender.id, event.raw_text)
         await event.respond(reply)
-        
+
+# Находим этот блок в handle_tg и заменяем:
         tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
-        await tg_client.send_message('me', f"🔥 {tag}\n👤: {sender.first_name}\n💬: {event.raw_text}")
+        
+        # Создаем ссылку на пользователя
+        user_link = f"[{sender.first_name}](tg://user?id={sender.id})"
+        if sender.username:
+            user_link = f"[@{sender.username}](https://t.me/{sender.username})"
+
+        await tg_client.send_message('me', f"🔥 {tag}\n👤: {user_link}\n💬: {event.raw_text}", link_preview=True)
+
+
+#       tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
+#      await tg_client.send_message('me', f"🔥 {tag}\n👤: {sender.first_name}\n💬: {event.raw_text}")
     except errors.rpcerrorlist.SlowModeWaitError:
         print("Slow mode active")
     except Exception as e:
