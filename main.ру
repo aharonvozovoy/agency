@@ -3,24 +3,56 @@ import asyncio
 import sys
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
+from groq import Groq
 
-# --- НАСТРОЙКИ ---
+# --- НАСТРОЙКИ (Берутся из переменных Render) ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
+GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-# Твой текст ответа в чат
-MY_REPLY = "Ищу возможность для заработка (нужны деньги), что можете мне предложить?"
-
-# Ключевые слова
-KEYWORDS = ['работа', 'вакансия', 'нужен', 'ищу', 'сотрудничество', 'деньги', 'оплата', 'заказ', 'подработка']
-BAD_WORDS = ['заблокирован', 'правила чата', 'id3495', 'msgwarn']
-
-if not SESSION_STR:
-    print("❌ ОШИБКА: Переменная SESSION не найдена!")
+# Проверка ключей
+if not SESSION_STR or not GROQ_KEY:
+    print("❌ ОШИБКА: Проверь переменные окружения в Render (SESSION и GROQ_API_KEY)!")
     sys.exit(1)
 
+# Инициализация ИИ и Telegram
+ai_client = Groq(api_key=GROQ_KEY)
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+
+# Память бота (чтобы не забывать контекст диалога)
+dialog_history = {}
+
+# Инструкция для ИИ
+SYSTEM_PROMPT = """Ты — опытный фрилансер Аарон. Твоя цель: получить заказ.
+Отвечай вежливо, кратко и по делу (максимум 2-3 предложения).
+Обязательно используй фразу: 'Ищу возможность для заработка (нужны деньги)'.
+Если клиент просит подробности, предлагай обсудить в личных сообщениях.
+Пиши на языке клиента (если он пишет по-русски — отвечай по-русски, если по-английски — по-английски)."""
+
+# Ключевые слова для поиска заказов
+KEYWORDS = ['работа', 'вакансия', 'нужен', 'ищу', 'сотрудничество', 'деньги', 'оплата', 'заказ', 'подработка']
+# Исключаем системный мусор
+BAD_WORDS = ['заблокирован', 'правила чата', 'msgwarn', 'id3495']
+
+async def get_ai_response(user_id, user_text):
+    """Запрашивает умный ответ у нейросети"""
+    if user_id not in dialog_history:
+        dialog_history[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
+    
+    dialog_history[user_id].append({"role": "user", "content": user_text})
+    
+    try:
+        completion = ai_client.chat.completions.create(
+            model="llama3-8b-8192", 
+            messages=dialog_history[user_id]
+        )
+        ai_text = completion.choices[0].message.content
+        dialog_history[user_id].append({"role": "assistant", "content": ai_text})
+        return ai_text
+    except Exception as e:
+        print(f"Ошибка ИИ: {e}")
+        return "Ищу возможность для заработка (нужны деньги), готов обсудить ваше предложение!"
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -28,42 +60,45 @@ async def handler(event):
         if event.out: return # Не отвечаем себе
 
         text = event.raw_text.lower()
-        
-        if any(word in text for word in KEYWORDS) and not any(bad in text for bad in BAD_WORDS):
+        sender = await event.get_sender()
+        if not sender: return
+        user_id = sender.id
+
+        # Проверка: Ключевое слово в группе ИЛИ нам ответили в личке
+        is_order = any(word in text for word in KEYWORDS) and not any(bad in text for bad in BAD_WORDS)
+        is_private = event.is_private
+
+        if is_order or (is_private and user_id in dialog_history):
+            # 1. Генерируем умный ответ через ИИ
+            ai_reply = await get_ai_response(user_id, event.raw_text)
             
-            # Получаем данные отправителя
-            sender = await event.get_sender()
-            sender_id = sender.id
-            # Формируем ссылку: если есть username — по нему, если нет — по ID
+            # 2. Небольшая задержка (имитация человека)
+            await asyncio.sleep(4)
+            
+            # 3. Отправляем ответ
+            await event.reply(ai_reply)
+
+            # 4. Формируем ссылку на заказчика
             if hasattr(sender, 'username') and sender.username:
                 user_link = f"https://t.me/{sender.username}"
             else:
-                user_link = f"tg://user?id={sender_id}"
-            
-            await asyncio.sleep(3) # Задержка 3 секунды
-            
-            # 1. Отвечаем в чат (реплаем)
-            await event.reply(MY_REPLY)
-            
-            # 2. Пишем тебе в "Избранное" со ссылкой на личку
-            chat_title = event.chat.title if event.chat else "Личный чат"
-            
+                user_link = f"tg://user?id={user_id}"
+
+            # 5. Отчет в "Избранное"
+            chat_title = event.chat.title if event.chat else "Личка"
             await client.send_message('me', 
-                f"💰 **НАЙДЕН ЗАКАЗ И ОТПРАВЛЕН ОТВЕТ!**\n\n"
-                f"📍 **Чат:** {chat_title}\n"
-                f"👤 **Заказчик:** {sender.first_name if hasattr(sender, 'first_name') else 'Пользователь'}\n"
-                f"📝 **Текст:** {event.raw_text[:200]}...\n\n"
-                f"🔗 **НАПИСАТЬ В ЛИЧКУ:** {user_link}\n\n"
-                f"🚀 Действуй быстрее всех!")
-            
-            print(f"✅ Ответил и прислал ссылку. Чат: {chat_title}")
+                f"🤖 **ИИ ВСТУПИЛ В ДИАЛОГ!**\n\n"
+                f"📍 Чат: {chat_title}\n"
+                f"👤 Заказчик: {sender.first_name}\n"
+                f"💬 Твой ответ: {ai_reply}\n\n"
+                f"🔗 **СВЯЗАТЬСЯ:** {user_link}")
 
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"Ошибка в обработчике: {e}")
 
 async def main():
     await client.start()
-    print("🚀 БОТ-АВТООТВЕТЧИК С СЫЛКАМИ ЗАПУЩЕН")
+    print("🚀 УМНЫЙ ИИ-АГЕНТ ЗАПУЩЕН")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
