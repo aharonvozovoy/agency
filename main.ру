@@ -1,110 +1,20 @@
-import os
-import asyncio
-import threading
-import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
-from telethon import TelegramClient, events
-from neonize.client import NewClient
-from neonize.events import MessageEv
-
-# --- 1. СЕРВЕР ДЛЯ RENDER (Статус Live) ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Aaron Full System: Online")
-
-def run_health_server():
-    port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
-
-# --- 2. НАСТРОЙКИ (Твои данные) ---
-API_ID = 30893125 
-API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '66618169428'
-
-tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
-wa_client = NewClient("db.sqlite3")
-
-# --- 3. ГЛОБАЛЬНАЯ СТАТИСТИКА ---
-stats = {
-    "tg_in": 0, "wa_in": 0,
-    "dots_count": 0,
-    "money_thb": 0, "money_usd": 0,
-    "bikes_found": 0
-}
-
-def get_ai_level():
-    total = stats["tg_in"] + stats["wa_in"]
-    if total < 15: return "⚡ Уровень 1: Базовый анализ"
-    if total < 50: return "🔥 Уровень 2: Продвинутый (Сделки)"
-    return "💎 Уровень 3: Максимальный ИИ (Фин-контроль)"
-
-def deep_analyze(text):
-    text = text.lower()
-    
-    # Поиск байков
-    bikes = ["pcx", "nmax", "forza", "xmax", "click", "adv"]
-    for bike in bikes:
-        if bike in text:
-            stats["bikes_found"] += 1
-
-    # Поиск валют (Баты и Доллары)
-    thb = sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
-    usd = sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd|дол)', text))
-    
-    stats["money_thb"] += thb
-    stats["money_usd"] += usd
-    return thb, usd
-
-# --- 4. ОБРАБОТЧИКИ ---
-@wa_client.event(MessageEv)
-def on_wa_message(client, message: MessageEv):
-    msg_text = (message.Message.conversation or "").lower()
-    if not message.Info.FromMe:
-        stats["wa_in"] += 1
-        deep_analyze(msg_text)
-    elif msg_text.strip() == ".":
-        stats["dots_count"] += 1 # Считаем точки в WhatsApp
-
-@tg_client.on(events.NewMessage)
-async def on_tg_message(event):
-    if not event.out and event.is_private:
-        stats["tg_in"] += 1
-        deep_analyze(event.raw_text)
-    
-    elif event.out and event.raw_text.strip() == ".":
-        stats["dots_count"] += 1 # Считаем точки в Telegram
-        await event.delete()
-        
-        # Вывод полного отчета со всей логикой
-        report = (
-            f"📈 **ОТЧЕТ ААРОНА**\n"
-            f"🧠 {get_ai_level()}\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📍 Твоих точек: {stats['dots_count']}\n"
-            f"💬 Сообщения: {stats['tg_in'] + stats['wa_in']}\n"
-            f"🏍 Байков в чатах: {stats['bikes_found']}\n"
-            f"💰 Касса THB: {stats['money_thb']}\n"
-            f"💵 Касса USD: {stats['money_usd']}\n"
-            f"━━━━━━━━━━━━━━"
-        )
-        await event.respond(report)
-
-# --- 5. ЗАПУСК ---
 async def start():
     threading.Thread(target=run_health_server, daemon=True).start()
     
-    # Пытаемся взять код из переменных Render
     code_env = os.environ.get('TG_CODE')
-    await tg_client.start(phone=PHONE, code_callback=lambda: code_env if code_env else None)
+    
+    if not code_env:
+        print("⚠️ ВНИМАНИЕ: Поле TG_CODE пустое. Бот на паузе, чтобы не получить бан.")
+        print("💡 Как только придет код в Telegram, вставь его в Environment Variables и нажми Save.")
+        # Бесконечный цикл ожидания, чтобы сервис не вылетал с ошибкой EOF
+        while not os.environ.get('TG_CODE'):
+            await asyncio.sleep(10)
+    
+    # Если код появился, пробуем войти
+    await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
     
     if not wa_client.is_connected():
         wa_client.pair_phone(PHONE)
         
-    print("✅ СИСТЕМА ПОЛНОСТЬЮ ЗАПУЩЕНА")
+    print("✅ АВТОРИЗАЦИЯ ПРОШЛА! СИСТЕМА ЗАПУЩЕНА")
     await tg_client.run_until_disconnected()
-
-if __name__ == '__main__':
-    asyncio.run(start())
