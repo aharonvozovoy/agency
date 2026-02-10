@@ -1,20 +1,42 @@
-async def start():
-    threading.Thread(target=run_health_server, daemon=True).start()
-    
-    code_env = os.environ.get('TG_CODE')
-    
-    if not code_env:
-        print("⚠️ ВНИМАНИЕ: Поле TG_CODE пустое. Бот на паузе, чтобы не получить бан.")
-        print("💡 Как только придет код в Telegram, вставь его в Environment Variables и нажми Save.")
-        # Бесконечный цикл ожидания, чтобы сервис не вылетал с ошибкой EOF
-        while not os.environ.get('TG_CODE'):
-            await asyncio.sleep(10)
-    
-    # Если код появился, пробуем войти
-    await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
-    
-    if not wa_client.is_connected():
-        wa_client.pair_phone(PHONE)
-        
-    print("✅ АВТОРИЗАЦИЯ ПРОШЛА! СИСТЕМА ЗАПУЩЕНА")
-    await tg_client.run_until_disconnected()
+import os
+import asyncio
+import threading
+import re
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from telethon import TelegramClient, events
+from neonize.client import NewClient
+from neonize.events import MessageEv
+
+# --- 1. СЕРВЕР ДЛЯ RENDER (Чтобы статус был Live) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Aaron System is Active and Waiting")
+
+def run_health_server():
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    server.serve_forever()
+
+# --- 2. НАСТРОЙКИ (Твои данные) ---
+API_ID = 30893125
+API_HASH = '5c73de68f3152f0513292cb495071e0b'
+PHONE = '66618169428'
+
+tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
+wa_client = NewClient("db.sqlite3")
+
+# --- 3. ГЛОБАЛЬНАЯ СТАТИСТИКА (Точки, Деньги, Байки) ---
+stats = {
+    "tg_in": 0, "wa_in": 0,
+    "dots_count": 0,
+    "money_thb": 0, "money_usd": 0,
+    "bikes_found": 0
+}
+
+def get_ai_level():
+    total = stats["tg_in"] + stats["wa_in"]
+    if total < 15: return "⚡ Уровень 1: Базовый анализ"
+    if total < 50: return "🔥 Уровень 2: Продвинутый (Сделки)"
+    return "💎 Уровень 3: Максимальный ИИ (Фин-контроль)"
