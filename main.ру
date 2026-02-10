@@ -1,56 +1,86 @@
+import os
+import asyncio
+import threading
+import http.server
+import socketserver
+from telethon import TelegramClient, events
+from telethon.sessions import StringSession
+from groq import Groq
+
+# --- СИСТЕМА LIVE ---
+def run_health_check():
+    port = int(os.environ.get("PORT", 8080))
+    handler = http.server.SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        httpd.serve_forever()
+
+threading.Thread(target=run_health_check, daemon=True).start()
+
 # --- НАСТРОЙКИ ---
-# Теперь триггер — это наличие хотя бы одной точки в твоем сообщении
-# (но ты можешь настроить, чтобы бот срабатывал, например, только от 3 точек)
+API_ID = 30893125
+API_HASH = '5c73de68f3152f0513292cb495071e0b'
+SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
+GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-async def get_ai_response(user_text, relevance_level, history):
-    # Динамически меняем инструкцию в зависимости от количества точек
+ai_client = Groq(api_key=GROQ_KEY)
+# Создаем объект client ПЕРЕД использованием в декораторах
+client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+
+async def get_ai_response(relevance_level, history):
+    # Логика уровней релевантности на основе твоих точек
     if relevance_level >= 5:
-        style = "Максимально подробно, вежливо и убедительно. Это VIP клиент. Закрывай сделку любой ценой."
+        instruction = "Это VIP клиент. Отвечай максимально развернуто, очень вежливо и экспертно. Закрой сделку."
     elif relevance_level >= 3:
-        style = "Стандартный деловой стиль. Четко, по делу, профессионально."
+        instruction = "Деловой стандарт. Четкий, профессиональный ответ по существу."
     else:
-        style = "Максимально кратко и быстро. Один-два коротких предложения."
+        instruction = "Краткий ответ. 1-2 предложения, минимум воды."
 
-    prompt = f"Ты — Аарон, эксперт в Паттайе. {style} Темы: рыбалка, трансферы, байки, визы."
+    prompt = f"Ты — Аарон, профи в Паттайе. {instruction} Темы: рыбалка, байки, визы, трансферы."
     
     messages = [{"role": "system", "content": prompt}]
     for msg in history:
         role = "assistant" if msg.out else "user"
-        # Убираем точки из контекста, чтобы ИИ не запутался
-        clean_text = msg.text.replace('.', '') if msg.text else ""
-        messages.append({"role": role, "content": clean_text})
+        # Убираем твои триггерные точки из памяти ИИ, чтобы он не спамил ими сам
+        content = msg.text.replace('.', '') if msg.text else ""
+        messages.append({"role": role, "content": content})
     
     try:
         completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=messages)
         return completion.choices[0].message.content
     except:
-        return "Секунду, сейчас уточню детали..."
+        return "Секунду, сверяю информацию по вашему вопросу..."
 
 @client.on(events.NewMessage)
 async def handler(event):
     try:
-        if not event.is_private: return # Работаем только в личке
+        if not event.is_private: return
         
         sender = await event.get_sender()
         text = event.raw_text
         
-        # Если ТЫ пишешь сообщение клиенту
+        # Активация ИИ только на ТВОИ исходящие сообщения с точками
         if event.out:
-            dot_count = text.count('.') # Считаем точки
+            dot_count = text.count('.') # Считаем точки в твоем тексте
             
-            # Активируем ИИ, если в твоем сообщении от 1 до 5 точек
-            if 1 <= dot_count <= 5:
-                # Берем историю для анализа
+            # Если ты поставил от 1 до 5 точек (и больше ничего или короткую фразу)
+            if 1 <= dot_count <= 10:
                 history = await client.get_messages(event.chat_id, limit=10)
                 
-                # Запускаем ИИ с учетом уровня релевантности (количества точек)
-                ai_reply = await get_ai_response("Продолжи", dot_count, history[::-1])
+                ai_reply = await get_ai_response(dot_count, history[::-1])
                 
-                await asyncio.sleep(2) # Пауза для естественности
+                await asyncio.sleep(2) # Эффект печатания
                 await event.respond(ai_reply)
                 
-                # Отчет для тебя в Избранное
-                await client.send_message('me', f"🤖 **ИИ включен (Уровень {dot_count})**\nКонтекст: {sender.first_name}")
+                # Уведомление в Избранное
+                await client.send_message('me', f"✅ **ИИ ОТВЕТИЛ (Уровень: {dot_count})**\nДля: {sender.first_name}")
 
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"Ошибка в обработчике: {e}")
+
+async def main():
+    await client.start()
+    print("🚀 БОТ ЗАПУЩЕН И ГОТОВ К РАБОТЕ С ТОЧКАМИ")
+    await client.run_until_disconnected()
+
+if __name__ == '__main__':
+    asyncio.run(main())
