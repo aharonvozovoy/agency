@@ -26,22 +26,21 @@ ai_client = Groq(api_key=GROQ_KEY)
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 dialog_history = {}
 
-# Ветка 1: Общие услуги
-WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт', 'бкк']
+# Ветка 1: Общие услуги (БЕЗ ДИЗАЙНА)
+WORK_KEYWORDS = ['рыбалка', 'fishing', 'такси', 'аэропорт', 'бкк', 'трансфер', 'байк', 'виза', 'visa']
 # Ветка 2: Для девушек (VIP сопровождение)
-GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'ищу парня', 'прогулка', 'ужин', 'вечер']
+GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'ищу парня', 'прогулка', 'ужин', 'вечер', 'вместе', 'пройтись']
 
-BAD_WORDS = ['испания', 'европа', 'арбитраж', 'трафик', 'crypto', 'валюта']
+BAD_WORDS = ['испания', 'европа', 'арбитраж', 'трафик', 'crypto', 'валюта', 'дизайн', 'логотип']
 
-# Промпты для разных ситуаций
-WORK_PROMPT = "Ты — помощник Аарон. Услуги: рыбалка, дизайн, такси. Фраза: 'Ищу возможность для заработка (нужны деньги)'. Кратко."
-GIRLS_PROMPT = "Ты — галантный спутник Аарон. Услуги: сопровождение для дам, ужин, прогулки. Фраза: 'Предоставляю услуги сопровождения на коммерческой основе (ценю свое время и ваш комфорт)'. Стиль: вежливый, харизматичный."
+# Тексты, которые приносят деньги
+WORK_PROMPT = "Ты — Аарон, профи в Паттайе. Услуги: рыбалка, такси, визы. Пиши: 'Привет! Я в Паттайе, помогу с этим прямо сейчас. Сделаю всё четко. Напишите в личку, обсудим!'"
+GIRLS_PROMPT = "Ты — галантный Аарон. Услуги: компания для дам, ужин, прогулки. Пиши: 'Добрый вечер! Как раз свободен для приятной компании. Знаю лучшие места в городе, со мной будет комфортно. Напишите мне в личку?'"
 
 async def get_ai_response(user_id, user_text, is_girl_request):
     prompt = GIRLS_PROMPT if is_girl_request else WORK_PROMPT
     if user_id not in dialog_history:
         dialog_history[user_id] = [{"role": "system", "content": prompt}]
-    
     dialog_history[user_id].append({"role": "user", "content": user_text})
     completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=dialog_history[user_id])
     ai_text = completion.choices[0].message.content
@@ -56,7 +55,6 @@ async def handler(event):
         if not sender: return
         text = event.raw_text.lower()
         
-        # Определяем ветку
         is_girl_req = any(word in text for word in GIRLS_KEYWORDS)
         is_work_req = any(word in text for word in WORK_KEYWORDS)
         is_bad = any(bad in text for bad in BAD_WORDS)
@@ -67,21 +65,18 @@ async def handler(event):
             await event.reply(ai_reply)
 
         elif event.is_private:
-            # В личке проверяем историю, какая ветка была начата
             ai_reply = await get_ai_response(sender.id, event.raw_text, is_girl_req)
             await asyncio.sleep(2)
             await event.respond(ai_reply)
-            
             user_link = f"https://t.me/{sender.username}" if hasattr(sender, 'username') and sender.username else f"tg://user?id={sender.id}"
             tag = "💎 VIP ДЕВУШКА" if is_girl_req else "🛠 ЗАКАЗ"
-            
             await client.send_message('me', f"🔥 **{tag} В ЛИЧКЕ!**\n\n👤: {sender.first_name}\n💬: {event.raw_text}\n🤖: {ai_reply}\n\n🔗 **ОТКРЫТЬ:** {user_link}")
     except Exception as e:
         print(f"Ошибка: {e}")
 
 async def main():
     await client.start()
-    print("🚀 ГИБРИДНЫЙ БОТ ЗАПУЩЕН")
+    print("🚀 ОХОТНИК ЗА ЗАКАЗАМИ В ПАТТАЙЕ ЗАПУЩЕН")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
