@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from groq import Groq
 
-# --- СИСТЕМА ПОДДЕРЖКИ СТАТУСА LIVE (Чтобы Render не выключал бота) ---
+# --- СЕРВЕР LIVE ---
 def run_health_check():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
@@ -16,7 +16,7 @@ def run_health_check():
 
 threading.Thread(target=run_health_check, daemon=True).start()
 
-# --- НАСТРОЙКИ ПОДКЛЮЧЕНИЯ ---
+# --- НАСТРОЙКИ ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
@@ -26,71 +26,72 @@ ai_client = Groq(api_key=GROQ_KEY)
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 dialog_history = {}
 
-# --- КЛЮЧЕВЫЕ СЛОВА ДЛЯ ПАТТАЙИ ---
-# Ветка 1: Услуги и логистика (деньги на комиссии и сервисе)
-WORK_KEYWORDS = ['рыбалка', 'fishing', 'такси', 'аэропорт', 'бкк', 'трансфер', 'байк', 'виза', 'visa', 'лодка', 'катер']
-# Ветка 2: VIP-сопровождение (деньги за личное время)
-GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'ищу парня', 'прогулка', 'ужин', 'вечер', 'вместе', 'пройтись', 'кто свободен']
+# Твой секретный знак для активации бота в личке
+BOT_TRIGGER = "😉" 
 
-# Исключаем мусор и конкурентов
-BAD_WORDS = ['испания', 'европа', 'арбитраж', 'трафик', 'crypto', 'валюта', 'дизайн', 'логотип', 'удаленка']
+# Инструкции для ИИ
+WORK_PROMPT = "Ты — Аарон. Услуги: рыбалка, трансферы, байки. Пиши кратко, дружелюбно, со смайликами. Закрывай клиента на встречу или созвон."
+GIRLS_PROMPT = "Ты — харизматичный Аарон. Услуги: сопровождение, ужин, прогулки. Пиши галантно, с легким флиртом 😉. Твоя цель — договориться о встрече."
 
-# --- ПРОДАЮЩИЕ ИНСТРУКЦИИ ДЛЯ ИИ ---
-WORK_PROMPT = """Ты — Аарон, надежный человек в Паттайе. Твои услуги: организация рыбалки, трансферы и помощь с байками/визами. 
-Твой ответ: 'Привет! Я в Паттайе, могу взять это на себя и помочь прямо сейчас. Сделаю всё четко и по делу. Напишите мне в личку, обсудим!'"""
-
-GIRLS_PROMPT = """Ты — галантный и харизматичный Аарон. Ты предлагаешь сопровождение для дам: ужины, прогулки по лучшим местам и компания. 
-Твой ответ: 'Добрый вечер! Как раз свободен для отличной компании. Знаю самые атмосферные места в городе, со мной будет комфортно. Загляните в личку?'"""
-
-async def get_ai_response(user_id, user_text, is_girl_request):
+async def get_ai_response(user_id, user_text, is_girl_request, history_context=None):
     prompt = GIRLS_PROMPT if is_girl_request else WORK_PROMPT
-    if user_id not in dialog_history:
-        dialog_history[user_id] = [{"role": "system", "content": prompt}]
     
-    dialog_history[user_id].append({"role": "user", "content": user_text})
+    # Формируем контекст из последних сообщений для связности
+    messages = [{"role": "system", "content": prompt}]
+    if history_context:
+        for msg in history_context:
+            role = "assistant" if msg.out else "user"
+            messages.append({"role": role, "content": msg.text})
+    
+    messages.append({"role": "user", "content": user_text})
+    
     try:
-        completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=dialog_history[user_id])
-        ai_text = completion.choices[0].message.content
-        dialog_history[user_id].append({"role": "assistant", "content": ai_text})
-        return ai_text
+        completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=messages)
+        return completion.choices[0].message.content
     except:
-        return "Напишите мне в личку, готов обсудить детали!"
+        return "Давай в личке обсудим, так удобнее будет! ;)"
 
 @client.on(events.NewMessage)
 async def handler(event):
     try:
-        if event.out: return 
         sender = await event.get_sender()
         if not sender: return
-        text = event.raw_text.lower()
+        text = event.raw_text
         
-        # Фильтрация
-        is_girl_req = any(word in text for word in GIRLS_KEYWORDS)
-        is_work_req = any(word in text for word in WORK_KEYWORDS)
-        is_bad = any(bad in text for bad in BAD_WORDS)
+        # 1. Работа в группах (Ловля лидов)
+        if not event.is_private:
+            is_girl = any(w in text.lower() for w in ['ужин', 'составить компанию', 'вечер'])
+            is_work = any(w in text.lower() for w in ['рыбалка', 'такси', 'байк', 'виза'])
+            
+            if (is_girl or is_work) and len(text) < 300:
+                ai_reply = await get_ai_response(sender.id, text, is_girl)
+                await asyncio.sleep(3)
+                await event.reply(ai_reply)
 
-        # Работа в группах
-        if not event.is_private and (is_girl_req or is_work_req) and not is_bad:
-            ai_reply = await get_ai_response(sender.id, event.raw_text, is_girl_req)
-            await asyncio.sleep(2) # Небольшая пауза для естественности
-            await event.reply(ai_reply)
-
-        # Работа в личке (Уведомление для тебя)
+        # 2. Умная личка (Перехват диалога)
         elif event.is_private:
-            ai_reply = await get_ai_response(sender.id, event.raw_text, is_girl_req)
-            await event.respond(ai_reply)
+            # Если ТЫ отправил смайлик-триггер
+            if event.out and text.strip() == BOT_TRIGGER:
+                # Берем последние 5 сообщений для контекста
+                history = await client.get_messages(event.chat_id, limit=5)
+                # Определяем тип клиента по контексту
+                is_girl = any("💎" in m.text for m in history if m.out)
+                
+                ai_reply = await get_ai_response(sender.id, "Продолжи диалог за меня", is_girl, history[::-1])
+                await asyncio.sleep(2)
+                await event.respond(ai_reply)
             
-            user_link = f"https://t.me/{sender.username}" if hasattr(sender, 'username') and sender.username else f"tg://user?id={sender.id}"
-            tag = "💎 VIP ДЕВУШКА" if is_girl_req else "🛠 ЗАКАЗ"
-            
-            # Отправка тебе в "Избранное"
-            await client.send_message('me', f"🔥 **{tag} В ЛИЧКЕ!**\n\n👤: {sender.first_name}\n💬: {event.raw_text}\n🤖: {ai_reply}\n\n🔗 **ОТКРЫТЬ:** {user_link}")
+            # Если пишет КЛИЕНТ (бот уведомляет тебя)
+            elif not event.out:
+                user_link = f"https://t.me/{sender.username}" if hasattr(sender, 'username') and sender.username else f"tg://user?id={sender.id}"
+                await client.send_message('me', f"📩 **НОВОЕ В ЛИЧКЕ!**\n👤: {sender.first_name}\n💬: {text}\n\n🔗 {user_link}")
+
     except Exception as e:
         print(f"Ошибка: {e}")
 
 async def main():
     await client.start()
-    print("🚀 ДЕНЕЖНЫЙ БОТ ЗАПУЩЕН")
+    print("🚀 ГИБРИДНЫЙ БОТ С ПЕРЕХВАТОМ ЗАПУЩЕН")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
