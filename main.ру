@@ -1,42 +1,143 @@
 import os
 import asyncio
 import threading
-import re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import http.server
+import socketserver
+import imaplib
+import smtplib
+import email
+import time
+from email.mime.text import MIMEText
 from telethon import TelegramClient, events
-from neonize.client import NewClient
-from neonize.events import MessageEv
+from telethon.sessions import StringSession
+from groq import Groq
+from pywa import WhatsApp
 
-# --- 1. СЕРВЕР ДЛЯ RENDER (Чтобы статус был Live) ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Aaron System is Active and Waiting")
-
-def run_health_server():
+# --- 1. HEALTH CHECK ДЛЯ RENDER (ЧТОБЫ НЕ БЫЛО TIMED OUT) ---
+def run_health_check():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
+    handler = http.server.SimpleHTTPRequestHandler
+    socketserver.TCPServer.allow_reuse_address = True
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        print(f"✅ Render port {port} is active")
+        httpd.serve_forever()
 
-# --- 2. НАСТРОЙКИ (Твои данные) ---
+threading.Thread(target=run_health_check, daemon=True).start()
+
+# --- 2. КОНФИГУРАЦИЯ ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '66618169428'
+SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
+GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
-wa_client = NewClient("db.sqlite3")
+# Настройки WhatsApp и Email из переменных окружения
+WA_PHONE_ID = os.environ.get('WA_PHONE_ID')
+WA_TOKEN = os.environ.get('WA_TOKEN')
+EMAIL_USER = os.environ.get('EMAIL_USER')
+EMAIL_PASS = os.environ.get('EMAIL_PASS')
+EMAIL_IMAP = "imap.gmail.com"
 
-# --- 3. ГЛОБАЛЬНАЯ СТАТИСТИКА (Точки, Деньги, Байки) ---
-stats = {
-    "tg_in": 0, "wa_in": 0,
-    "dots_count": 0,
-    "money_thb": 0, "money_usd": 0,
-    "bikes_found": 0
-}
+# Инициализация клиентов
+ai_client = Groq(api_key=GROQ_KEY)
+tg_client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+wa_client = WhatsApp(phone_id=WA_PHONE_ID, token=WA_TOKEN)
 
-def get_ai_level():
-    total = stats["tg_in"] + stats["wa_in"]
-    if total < 15: return "⚡ Уровень 1: Базовый анализ"
-    if total < 50: return "🔥 Уровень 2: Продвинутый (Сделки)"
-    return "💎 Уровень 3: Максимальный ИИ (Фин-контроль)"
+dialog_history = {}
+
+# --- 3. ЛОГИКА И ПРОМПТЫ ДЛЯ GROQ ---
+WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт', 'бкк']
+GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'ищу парня', 'прогулка', 'ужин', 'вечер', 'компания']
+BAD_WORDS = ['крипта', 'обмен', 'валюта', 'арбитраж', 'трафик']
+
+WORK_PROMPT = "Ты — помощник Аарон. Услуги: рыбалка, дизайн, такси. Фраза: 'Ищу возможность для заработка (нужны деньги)'. Кратко."
+GIRLS_PROMPT = "Ты — галантный спутник Аарон. Услуги: сопровождение для дам, ужин, прогулки. Фраза: 'Предоставляю услуги сопровождения на коммерческой основе (ценю свое время и ваш комфорт)'. Стиль: харизматичный."
+
+async def get_ai_response(user_id, user_text):
+    text_l = user_text.lower()
+    is_girl = any(word in text_l for word in GIRLS_KEYWORDS)
+    prompt = GIRLS_PROMPT if is_girl else WORK_PROMPT
+    
+    if user_id not in dialog_history:
+        dialog_history[user_id] = [{"role": "system", "content": prompt}]
+    
+    dialog_history[user_id].append({"role": "user", "content": user_text})
+    
+    try:
+        completion = ai_client.chat.completions.create(
+            model="llama3-8b-8192", 
+            messages=dialog_history[user_id]
+        )
+        ai_text = completion.choices[0].message.content
+        dialog_history[user_id].append({"role": "assistant", "content": ai_text})
+        return ai_text, is_girl
+    except Exception as e:
+        print(f"Ошибка Groq: {e}")
+        return "Ищу возможность для заработка, готов обсудить!", False
+
+# --- 4. ОБРАБОТЧИК EMAIL ---
+def email_loop():
+    while True:
+        try:
+            mail = imaplib.IMAP4_SSL(EMAIL_IMAP)
+            mail.login(EMAIL_USER, EMAIL_PASS)
+            mail.select("inbox")
+            _, data = mail.search(None, 'UNSEEN')
+            
+            for num in data[0].split():
+                _, msg_data = mail.fetch(num, '(RFC822)')
+                msg = email.message_from_bytes(msg_data[0][1])
+                sender = email.utils.parseaddr(msg['From'])[1]
+                subject = msg['Subject'] or ""
+                
+                reply_text, _ = asyncio.run(get_ai_response(sender, subject))
+                
+                # Отправка ответа
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                    smtp.login(EMAIL_USER, EMAIL_PASS)
+                    resp = MIMEText(reply_text)
+                    resp['Subject'] = "Re: " + subject
+                    resp['To'] = sender
+                    smtp.sendmail(EMAIL_USER, sender, resp.as_string())
+        except:
+            pass
+        time.sleep(30)
+
+# --- 5. ОБРАБОТЧИК TELEGRAM ---
+@tg_client.on(events.NewMessage)
+async def handle_tg(event):
+    if event.out: return
+    sender = await event.get_sender()
+    if not sender: return
+    
+    text = event.raw_text.lower()
+    if any(bad in text for bad in BAD_WORDS): return
+
+    if event.is_private or any(word in text for word in WORK_KEYWORDS + GIRLS_KEYWORDS):
+        reply, is_girl = await get_ai_response(sender.id, event.raw_text)
+        await asyncio.sleep(2)
+        await event.respond(reply)
+        
+        # Уведомление в Избранное
+        tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
+        user_link = f"https://t.me/{sender.username}" if getattr(sender, 'username', None) else f"ID: {sender.id}"
+        await tg_client.send_message('me', f"🔥 **{tag}**\n👤: {sender.first_name}\n💬: {event.raw_text}\n🔗: {user_link}")
+
+# --- 6. ОБРАБОТЧИК WHATSAPP ---
+@wa_client.on_message()
+def handle_wa(client, msg):
+    reply, _ = asyncio.run(get_ai_response(msg.from_user.wa_id, msg.text))
+    msg.reply_text(reply)
+
+# --- 7. ЗАПУСК ВСЕГО ---
+async def start_bot():
+    await tg_client.start()
+    print("🚀 СУПЕР-БОТ ААРОНА ЗАПУЩЕН (TG + WA + EMAIL)")
+    await tg_client.run_until_disconnected()
+
+if __name__ == '__main__':
+    threading.Thread(target=email_loop, daemon=True).start()
+    # WhatsApp запускается своим методом, если настроен webhook, иначе потоком
+    if WA_TOKEN:
+        threading.Thread(target=wa_client.run, daemon=True).start()
+    
+    asyncio.run(start_bot())
