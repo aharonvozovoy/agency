@@ -132,11 +132,18 @@ def email_loop():
 @tg_client.on(events.NewMessage)
 async def handle_tg(event):
     if event.out: return
-    sender = await event.get_sender()
-    reply, is_girl = await get_ai_response(sender.id, event.raw_text)
-    await event.respond(reply)
-    tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
-    await tg_client.send_message('me', f"🔥 **{tag}**\nОт: {sender.first_name}\n💬: {event.raw_text}")
+    try:
+        sender = await event.get_sender()
+        reply, is_girl = await get_ai_response(sender.id, event.raw_text)
+        await asyncio.sleep(2)
+        await event.respond(reply)
+        
+        tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
+        await tg_client.send_message('me', f"🔥 **{tag}**\n👤: {sender.first_name}\n💬: {event.raw_text}")
+    except telethon.errors.rpcerrorlist.SlowModeWaitError:
+        print("⚠️ В чате медленный режим, пропускаю...")
+    except Exception as e:
+        print(f"Ошибочка: {e}")
 
 # --- 7. ЗАПУСК ---
 if __name__ == '__main__':
