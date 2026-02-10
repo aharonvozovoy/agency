@@ -2,3 +2,4 @@ telethon
 groq
 python-dotenv
 neonize
+requests
