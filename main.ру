@@ -1,4 +1,6 @@
-import telethon  # Добавь это первой строкой
+import telethon  
+from telethon import TelegramClient, events, errors 
+# Добавь это первой строкой
 import os
 import asyncio
 import threading
