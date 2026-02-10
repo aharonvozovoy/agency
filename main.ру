@@ -4,7 +4,7 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from groq import Groq
 
-# --- НАСТРОЙКИ ---
+# --- НАСТРОЙКИ (Берутся из Render) ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
@@ -14,20 +14,30 @@ ai_client = Groq(api_key=GROQ_KEY)
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 dialog_history = {}
 
+# Твои интересы
 KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'помощник', 'паттайя', 'pattaya', 'такси', 'аэропорт', 'бкк', 'составить компанию']
-BAD_WORDS = ['испания', 'европа', 'арбитраж', 'трафик', 'crypto']
+BAD_WORDS = ['испания', 'европа', 'арбитраж', 'трафик', 'crypto', 'валюта']
 
-SYSTEM_PROMPT = """Ты — помощник Аарон в Паттайе. Услуги: рыбалка, дизайн, такси, компания на вечер. 
-ОБЯЗАТЕЛЬНО используй: 'Ищу возможность для заработка (нужны деньги)'. Отвечай кратко."""
+SYSTEM_PROMPT = """Ты — помощник Аарон в Паттайе. 
+Услуги: рыбалка, дизайн, такси в аэропорт, сопровождение. 
+ОБЯЗАТЕЛЬНО используй: 'Ищу возможность для заработка (нужны деньги)'. 
+Отвечай кратко, 1-2 предложения. Побуждай писать в ЛС."""
 
 async def get_ai_response(user_id, user_text):
     if user_id not in dialog_history:
         dialog_history[user_id] = [{"role": "system", "content": SYSTEM_PROMPT}]
     dialog_history[user_id].append({"role": "user", "content": user_text})
-    completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=dialog_history[user_id])
-    ai_text = completion.choices[0].message.content
-    dialog_history[user_id].append({"role": "assistant", "content": ai_text})
-    return ai_text
+    
+    try:
+        completion = ai_client.chat.completions.create(
+            model="llama3-8b-8192", 
+            messages=dialog_history[user_id]
+        )
+        ai_text = completion.choices[0].message.content
+        dialog_history[user_id].append({"role": "assistant", "content": ai_text})
+        return ai_text
+    except:
+        return "Ищу возможность для заработка (нужны деньги), готов обсудить! Пишите в личку."
 
 @client.on(events.NewMessage)
 async def handler(event):
@@ -38,36 +48,37 @@ async def handler(event):
         user_id = sender.id
         text = event.raw_text.lower()
 
-        # 1. Если это сообщение из ГРУППЫ по ключевым словам
+        # 1. РАБОТА В ГРУППАХ (Удочка)
         if not event.is_private:
             if any(word in text for word in KEYWORDS) and not any(bad in text for bad in BAD_WORDS):
                 ai_reply = await get_ai_response(user_id, event.raw_text)
                 await asyncio.sleep(3)
                 await event.reply(ai_reply)
-                # В ИЗБРАННОЕ НИЧЕГО НЕ ПИШЕМ - ждем ответа в личку
+                # УВЕДОМЛЕНИЕ НЕ ШЛЕМ
 
-        # 2. Если клиент написал В ЛИЧКУ (это и есть реальный интерес)
+        # 2. РАБОТА В ЛИЧКЕ (Реальный клиент)
         elif event.is_private:
             ai_reply = await get_ai_response(user_id, event.raw_text)
             await asyncio.sleep(2)
             await event.respond(ai_reply)
 
-            # Формируем ссылку
+            # Ссылка на клиента
             user_link = f"https://t.me/{sender.username}" if hasattr(sender, 'username') and sender.username else f"tg://user?id={user_id}"
 
-            # ОТПРАВЛЯЕМ В ИЗБРАННОЕ ТОЛЬКО ТЕПЕРЬ
+            # ШЛЕМ В ИЗБРАННОЕ ТОЛЬКО ЗДЕСЬ
             await client.send_message('me', 
-                f"🔥 **КЛИЕНТ НАПИСАЛ В ЛИЧКУ!**\n\n"
-                f"👤: {sender.first_name}\n"
-                f"💬 Его сообщение: {event.raw_text}\n"
-                f"🤖 Твой ИИ ответил: {ai_reply}\n\n"
-                f"🔗 **ПЕРЕЙТИ К ДИАЛОГУ:** {user_link}")
+                f"🔥 **ГОРЯЧИЙ КЛИЕНТ В ЛИЧКЕ!**\n\n"
+                f"👤 Имя: {sender.first_name}\n"
+                f"💬 Сообщение: {event.raw_text}\n"
+                f"🤖 Ответ ИИ: {ai_reply}\n\n"
+                f"🔗 **ОТКРЫТЬ ДИАЛОГ:** {user_link}")
 
     except Exception as e:
         print(f"Ошибка: {e}")
 
 async def main():
     await client.start()
+    print("🚀 ИИ-ФИЛЬТР ЗАПУЩЕН: Уведомления только из лички")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
