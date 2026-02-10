@@ -7,7 +7,7 @@ from telethon import TelegramClient, events
 from neonize.client import NewClient
 from neonize.events import MessageEv
 
-# --- СЕРВЕР ДЛЯ RENDER ---
+# --- 1. СЕРВЕР ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -19,37 +19,25 @@ def run_health_server():
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
 
-# --- НАСТРОЙКИ ---
-# Твой API ID: 30893125, API Hash: 5c73de68f3152f0513292cb495071e0b
+# --- 2. НАСТРОЙКИ ---
 API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = os.environ.get('PHONE_NUMBER', '66618169428')
+PHONE = '66618169428'
 
 tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
 wa_client = NewClient("db.sqlite3")
 
-# --- СТАТИСТИКА (Твои точки + Касса) ---
-stats = {
-    "tg_in": 0, "wa_in": 0,
-    "dots_count": 0,
-    "money_thb": 0, "money_usd": 0
-}
+stats = {"tg_in": 0, "wa_in": 0, "dots_count": 0, "money_thb": 0, "money_usd": 0}
 
-def get_ai_level():
-    total = stats["tg_in"] + stats["wa_in"]
-    if total < 15: return "Уровень 1: База"
-    if total < 50: return "Уровень 2: Аналитик"
-    return "Уровень 3: Максимум ИИ"
-
-# --- ОБРАБОТЧИКИ ---
+# --- 3. ОБРАБОТЧИКИ (Точки, Баты, Доллары, Уровни) ---
 @wa_client.event(MessageEv)
 def on_wa_message(client, message: MessageEv):
+    msg_text = (message.Message.conversation or "").lower()
     if not message.Info.FromMe:
         stats["wa_in"] += 1
-        text = (message.Message.conversation or "").lower()
-        stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
-        stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
-    elif message.Info.FromMe and message.Message.conversation == ".":
+        stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', msg_text))
+        stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', msg_text))
+    elif msg_text.strip() == ".":
         stats["dots_count"] += 1
 
 @tg_client.on(events.NewMessage)
@@ -59,29 +47,31 @@ async def on_tg_message(event):
         text = event.raw_text.lower()
         stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
         stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
-    elif event.out and event.raw_text == ".":
+    elif event.out and event.raw_text.strip() == ".":
         stats["dots_count"] += 1
         await event.delete()
-        report = (
-            f"📈 **ОТЧЕТ ААРОНА**\n"
-            f"🧠 {get_ai_level()}\n"
-            f"📍 Твоих точек: {stats['dots_count']}\n"
-            f"💬 Всего сообщений: {stats['tg_in'] + stats['wa_in']}\n"
-            f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD"
-        )
+        total = stats["tg_in"] + stats["wa_in"]
+        lvl = "1: База" if total < 15 else "2: Аналитик" if total < 50 else "3: Макс ИИ"
+        report = (f"📈 **ОТЧЕТ ААРОНА**\n🧠 {lvl}\n📍 Точек: {stats['dots_count']}\n"
+                  f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD")
         await event.respond(report)
 
-# --- ЗАПУСК БЕЗ ЗАПРОСОВ В КОНСОЛЬ ---
+# --- 4. ЗАПУСК (БЕЗ ВИСЯКОВ) ---
 async def start():
     threading.Thread(target=run_health_server, daemon=True).start()
-    # Авторизация Telegram через сохраненную сессию
-    await tg_client.start(phone=lambda: PHONE)
+    
+    # Пытаемся взять код из переменных Render, если он там есть
+    code_from_env = os.environ.get('TG_CODE')
+    
+    await tg_client.start(
+        phone=PHONE,
+        code_callback=lambda: code_from_env if code_from_env else input("Введите код: ")
+    )
     
     if not wa_client.is_connected():
-        print(f"📲 ГЕНЕРАЦИЯ КОДА ДЛЯ {PHONE}...")
         wa_client.pair_phone(PHONE)
         
-    print("✅ СИСТЕМА ЗАПУЩЕНА И ЖДЕТ КОД")
+    print("✅ СИСТЕМА ААРОН ЗАПУЩЕНА")
     await tg_client.run_until_disconnected()
 
 if __name__ == '__main__':
