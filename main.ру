@@ -11,15 +11,20 @@ from email.mime.text import MIMEText
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from groq import Groq
-from pywa import WhatsApp
 
-# --- 1. HEALTH CHECK ДЛЯ RENDER (ЧТОБЫ НЕ БЫЛО TIMED OUT) ---
+# Попытка импорта WhatsApp (Green-API)
+try:
+    from whatsapp_api_client_python import API
+    WA_AVAILABLE = True
+except ImportError:
+    WA_AVAILABLE = False
+
+# --- 1. HEALTH CHECK ДЛЯ RENDER ---
 def run_health_check():
     port = int(os.environ.get("PORT", 8080))
     handler = http.server.SimpleHTTPRequestHandler
     socketserver.TCPServer.allow_reuse_address = True
     with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"✅ Render port {port} is active")
         httpd.serve_forever()
 
 threading.Thread(target=run_health_check, daemon=True).start()
@@ -30,27 +35,27 @@ API_HASH = '5c73de68f3152f0513292cb495071e0b'
 SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
 GROQ_KEY = os.environ.get('GROQ_API_KEY')
 
-# Настройки WhatsApp и Email из переменных окружения
-WA_PHONE_ID = os.environ.get('WA_PHONE_ID')
-WA_TOKEN = os.environ.get('WA_TOKEN')
+# WhatsApp (Green-API) - Ключи появятся после регистрации
+ID_INSTANCE = os.environ.get('WA_ID_INSTANCE')
+API_TOKEN_INSTANCE = os.environ.get('WA_API_TOKEN')
+
+# Gmail
 EMAIL_USER = os.environ.get('EMAIL_USER')
 EMAIL_PASS = os.environ.get('EMAIL_PASS')
 EMAIL_IMAP = "imap.gmail.com"
+EMAIL_SMTP = "smtp.gmail.com"
 
-# Инициализация клиентов
 ai_client = Groq(api_key=GROQ_KEY)
 tg_client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
-wa_client = WhatsApp(phone_id=WA_PHONE_ID, token=WA_TOKEN)
 
 dialog_history = {}
 
-# --- 3. ЛОГИКА И ПРОМПТЫ ДЛЯ GROQ ---
-WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт', 'бкк']
-GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'ищу парня', 'прогулка', 'ужин', 'вечер', 'компания']
-BAD_WORDS = ['крипта', 'обмен', 'валюта', 'арбитраж', 'трафик']
+# --- 3. ЛОГИКА И ПРОМПТЫ ---
+WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт']
+GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'прогулка', 'ужин', 'вечер']
 
-WORK_PROMPT = "Ты — помощник Аарон. Услуги: рыбалка, дизайн, такси. Фраза: 'Ищу возможность для заработка (нужны деньги)'. Кратко."
-GIRLS_PROMPT = "Ты — галантный спутник Аарон. Услуги: сопровождение для дам, ужин, прогулки. Фраза: 'Предоставляю услуги сопровождения на коммерческой основе (ценю свое время и ваш комфорт)'. Стиль: харизматичный."
+WORK_PROMPT = "Ты — помощник Аарон. Услуги: рыбалка, дизайн. Фраза: 'Ищу заработок (нужны деньги)'."
+GIRLS_PROMPT = "Ты — галантный Аарон. Услуги сопровождения. Фраза: 'Предоставляю услуги на коммерческой основе'."
 
 async def get_ai_response(user_id, user_text):
     text_l = user_text.lower()
@@ -59,85 +64,84 @@ async def get_ai_response(user_id, user_text):
     
     if user_id not in dialog_history:
         dialog_history[user_id] = [{"role": "system", "content": prompt}]
-    
     dialog_history[user_id].append({"role": "user", "content": user_text})
     
     try:
-        completion = ai_client.chat.completions.create(
-            model="llama3-8b-8192", 
-            messages=dialog_history[user_id]
-        )
+        completion = ai_client.chat.completions.create(model="llama3-8b-8192", messages=dialog_history[user_id])
         ai_text = completion.choices[0].message.content
-        dialog_history[user_id].append({"role": "assistant", "content": ai_text})
         return ai_text, is_girl
-    except Exception as e:
-        print(f"Ошибка Groq: {e}")
-        return "Ищу возможность для заработка, готов обсудить!", False
+    except:
+        return "Привет! Готов обсудить детали, пишите!", is_girl
 
-# --- 4. ОБРАБОТЧИК EMAIL ---
+# --- 4. ОБРАБОТЧИК WHATSAPP (Green-API) ---
+def wa_loop():
+    if not WA_AVAILABLE or not ID_INSTANCE:
+        print("⚠️ WhatsApp пропущен (нет ключей или библиотеки)")
+        return
+    
+    wa_api = API.GreenApi(ID_INSTANCE, API_TOKEN_INSTANCE)
+    print("📲 WhatsApp мониторинг запущен")
+    while True:
+        try:
+            receive = wa_api.receiving.receiveNotification()
+            if receive.body:
+                receipt_id = receive.body['receiptId']
+                data = receive.body.get('messageData', {})
+                chat_id = receive.body['senderData']['chatId']
+                
+                if 'textMessageData' in data:
+                    text = data['textMessageData']['textMessage']
+                    reply, _ = asyncio.run(get_ai_response(chat_id, text))
+                    wa_api.sending.sendMessage(chat_id, reply)
+                
+                wa_api.receiving.deleteNotification(receipt_id)
+        except:
+            time.sleep(5)
+
+# --- 5. ОБРАБОТЧИК GMAIL ---
 def email_loop():
+    if not EMAIL_USER or not EMAIL_PASS:
+        print("⚠️ Почта пропущена (нет настроек)")
+        return
+        
+    print("📧 Gmail мониторинг запущен")
     while True:
         try:
             mail = imaplib.IMAP4_SSL(EMAIL_IMAP)
             mail.login(EMAIL_USER, EMAIL_PASS)
             mail.select("inbox")
             _, data = mail.search(None, 'UNSEEN')
-            
             for num in data[0].split():
                 _, msg_data = mail.fetch(num, '(RFC822)')
                 msg = email.message_from_bytes(msg_data[0][1])
                 sender = email.utils.parseaddr(msg['From'])[1]
                 subject = msg['Subject'] or ""
-                
                 reply_text, _ = asyncio.run(get_ai_response(sender, subject))
                 
-                # Отправка ответа
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                with smtplib.SMTP_SSL(EMAIL_SMTP, 465) as smtp:
                     smtp.login(EMAIL_USER, EMAIL_PASS)
                     resp = MIMEText(reply_text)
                     resp['Subject'] = "Re: " + subject
                     resp['To'] = sender
+                    resp['From'] = EMAIL_USER
                     smtp.sendmail(EMAIL_USER, sender, resp.as_string())
         except:
-            pass
-        time.sleep(30)
+            time.sleep(30)
 
-# --- 5. ОБРАБОТЧИК TELEGRAM ---
+# --- 6. ОБРАБОТЧИК TELEGRAM ---
 @tg_client.on(events.NewMessage)
 async def handle_tg(event):
     if event.out: return
     sender = await event.get_sender()
-    if not sender: return
-    
-    text = event.raw_text.lower()
-    if any(bad in text for bad in BAD_WORDS): return
+    reply, is_girl = await get_ai_response(sender.id, event.raw_text)
+    await event.respond(reply)
+    tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
+    await tg_client.send_message('me', f"🔥 **{tag}**\nОт: {sender.first_name}\n💬: {event.raw_text}")
 
-    if event.is_private or any(word in text for word in WORK_KEYWORDS + GIRLS_KEYWORDS):
-        reply, is_girl = await get_ai_response(sender.id, event.raw_text)
-        await asyncio.sleep(2)
-        await event.respond(reply)
-        
-        # Уведомление в Избранное
-        tag = "💎 VIP (TG)" if is_girl else "🛠 ЗАКАЗ (TG)"
-        user_link = f"https://t.me/{sender.username}" if getattr(sender, 'username', None) else f"ID: {sender.id}"
-        await tg_client.send_message('me', f"🔥 **{tag}**\n👤: {sender.first_name}\n💬: {event.raw_text}\n🔗: {user_link}")
-
-# --- 6. ОБРАБОТЧИК WHATSAPP ---
-@wa_client.on_message()
-def handle_wa(client, msg):
-    reply, _ = asyncio.run(get_ai_response(msg.from_user.wa_id, msg.text))
-    msg.reply_text(reply)
-
-# --- 7. ЗАПУСК ВСЕГО ---
-async def start_bot():
-    await tg_client.start()
-    print("🚀 СУПЕР-БОТ ААРОНА ЗАПУЩЕН (TG + WA + EMAIL)")
-    await tg_client.run_until_disconnected()
-
+# --- 7. ЗАПУСК ---
 if __name__ == '__main__':
+    threading.Thread(target=wa_loop, daemon=True).start()
     threading.Thread(target=email_loop, daemon=True).start()
-    # WhatsApp запускается своим методом, если настроен webhook, иначе потоком
-    if WA_TOKEN:
-        threading.Thread(target=wa_client.run, daemon=True).start()
-    
-    asyncio.run(start_bot())
+    print("🚀 БОТ ЗАПУСКАЕТСЯ...")
+    tg_client.start()
+    tg_client.run_until_disconnected()
