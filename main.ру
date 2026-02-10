@@ -7,19 +7,20 @@ from telethon import TelegramClient, events
 from neonize.client import NewClient
 from neonize.events import MessageEv
 
-# --- 1. СЕРВЕР ДЛЯ RENDER ---
+# --- СЕРВЕР ДЛЯ RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is Back to Normal")
+        self.wfile.write(b"Aaron System Live")
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     server.serve_forever()
 
-# --- 2. НАСТРОЙКИ (ТВОИ КЛЮЧИ) ---
+# --- НАСТРОЙКИ ---
+# Твой API ID: 30893125, API Hash: 5c73de68f3152f0513292cb495071e0b
 API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = os.environ.get('PHONE_NUMBER', '66618169428')
@@ -27,7 +28,7 @@ PHONE = os.environ.get('PHONE_NUMBER', '66618169428')
 tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
 wa_client = NewClient("db.sqlite3")
 
-# --- 3. СТАТИСТИКА (Точки + Деньги + Сообщения) ---
+# --- СТАТИСТИКА (Твои точки + Касса) ---
 stats = {
     "tg_in": 0, "wa_in": 0,
     "dots_count": 0,
@@ -40,13 +41,12 @@ def get_ai_level():
     if total < 50: return "Уровень 2: Аналитик"
     return "Уровень 3: Максимум ИИ"
 
-# --- 4. ОБРАБОТЧИКИ ---
+# --- ОБРАБОТЧИКИ ---
 @wa_client.event(MessageEv)
 def on_wa_message(client, message: MessageEv):
     if not message.Info.FromMe:
         stats["wa_in"] += 1
         text = (message.Message.conversation or "").lower()
-        # Поиск денег
         stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
         stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
     elif message.Info.FromMe and message.Message.conversation == ".":
@@ -59,28 +59,30 @@ async def on_tg_message(event):
         text = event.raw_text.lower()
         stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
         stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd)', text))
-    
     elif event.out and event.raw_text == ".":
         stats["dots_count"] += 1
         await event.delete()
-        
         report = (
             f"📈 **ОТЧЕТ ААРОНА**\n"
             f"🧠 {get_ai_level()}\n"
             f"📍 Твоих точек: {stats['dots_count']}\n"
-            f"💬 Сообщения: {stats['tg_in'] + stats['wa_in']}\n"
+            f"💬 Всего сообщений: {stats['tg_in'] + stats['wa_in']}\n"
             f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD"
         )
         await event.respond(report)
 
-# --- 5. ЗАПУСК ---
-async def main():
+# --- ЗАПУСК БЕЗ ЗАПРОСОВ В КОНСОЛЬ ---
+async def start():
     threading.Thread(target=run_health_server, daemon=True).start()
-    await tg_client.start()
+    # Авторизация Telegram через сохраненную сессию
+    await tg_client.start(phone=lambda: PHONE)
+    
     if not wa_client.is_connected():
-        print(f"📲 КОД ДЛЯ {PHONE}:")
+        print(f"📲 ГЕНЕРАЦИЯ КОДА ДЛЯ {PHONE}...")
         wa_client.pair_phone(PHONE)
+        
+    print("✅ СИСТЕМА ЗАПУЩЕНА И ЖДЕТ КОД")
     await tg_client.run_until_disconnected()
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    asyncio.run(start())
