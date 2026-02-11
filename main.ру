@@ -1,178 +1,96 @@
-import os
-import asyncio
-import threading
-import http.server
-import socketserver
-import imaplib
-import smtplib
-import email
-import time
-import requests
-from email.mime.text import MIMEText
+import os, asyncio, threading, re
+from telethon import TelegramClient, events
+from neonize.client import NewClient
+from neonize.events import MessageEv
+from openai import OpenAI
+from googleapiclient.discovery import build
 
-# Импортируем телетон правильно, чтобы не было NameError
-import telethon
-from telethon import TelegramClient, events, errors
-
-from groq import Groq
-
-# --- 1. HEALTH CHECK ДЛЯ RENDER ---
-def run_health_check():
-    port = int(os.environ.get("PORT", 8080))
-    handler = http.server.SimpleHTTPRequestHandler
-    socketserver.TCPServer.allow_reuse_address = True
-    try:
-        with socketserver.TCPServer(("", port), handler) as httpd:
-            print(f"Health check on port {port}")
-            httpd.serve_forever()
-    except Exception as e:
-        print(f"Health check error: {e}")
-
-threading.Thread(target=run_health_check, daemon=True).start()
-
-# --- 2. КОНФИГУРАЦИЯ ---
-API_ID = 30893125
+# --- НАСТРОЙКИ (Твои данные) ---
+API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-SESSION_STR = os.environ.get('TELEGRAM_STRING_SESSION')
-GROQ_KEY = os.environ.get('GROQ_API_KEY')
-WHAPI_TOKEN = os.environ.get('WHAPI_TOKEN') # Тот самый токен со скрина
+PHONE = '66618169428'
 
-EMAIL_USER = os.environ.get('EMAIL_USER')
-EMAIL_PASS = os.environ.get('EMAIL_PASS')
+# ГРОК (xAI) - Ключ берем из настроек Render
+XAI_API_KEY = os.environ.get("XAI_API_KEY")
+client_grok = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
 
-ai_client = Groq(api_key=GROQ_KEY)
-tg_client = TelegramClient(telethon.sessions.StringSession(SESSION_STR), API_ID, API_HASH)
+tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
+wa_client = NewClient("db.sqlite3")
 
-dialog_history = {}
+# Статистика (Точки, Деньги, Байки)
+stats = {
+    "tg_in": 0, "wa_in": 0, 
+    "dots_count": 0, 
+    "money_thb": 0, "money_usd": 0,
+    "bikes_found": 0
+}
 
-# --- 3. ЛОГИКА И ПРОМПТЫ ---
-WORK_KEYWORDS = ['рыбалка', 'fishing', 'дизайн', 'логотип', 'такси', 'аэропорт']
-GIRLS_KEYWORDS = ['составить компанию', 'скучно', 'прогулка', 'ужин', 'вечер']
+# Логика анализа текста
+def deep_analyze(text):
+    text = text.lower()
+    # Поиск байков
+    bikes = ["pcx", "nmax", "forza", "xmax", "click", "adv"]
+    for bike in bikes:
+        if bike in text: stats["bikes_found"] += 1
+    # Расчет валют
+    stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
+    stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd|дол)', text))
 
-WORK_PROMPT = "Ты — помощник Аарон. Услуги: рыбалка, дизайн. Фраза: 'Ищу заработок (нужны деньги)'."
-GIRLS_PROMPT = "Ты — галантный Аарон. Услуги сопровождения. Фраза: 'Предоставляю услуги на коммерческой основе'."
+# --- ОБРАБОТКА WHATSAPP ---
+@wa_client.event(MessageEv)
+def on_wa_message(client, message: MessageEv):
+    msg_text = (message.Message.conversation or "").strip()
+    if not message.Info.FromMe:
+        stats["wa_in"] += 1
+        deep_analyze(msg_text)
+    elif msg_text == ".":
+        stats["dots_count"] += 1 # Считаем точки в WA
 
-async def get_ai_response(user_id, user_text):
-    text_l = user_text.lower()
-    is_girl = any(word in text_l for word in GIRLS_KEYWORDS)
-    prompt = GIRLS_PROMPT if is_girl else WORK_PROMPT
-    
-    if user_id not in dialog_history:
-        dialog_history[user_id] = [{"role": "system", "content": prompt}]
-    
-    dialog_history[user_id].append({"role": "user", "content": user_text})
-    
-    try:
-        completion = ai_client.chat.completions.create(
-            model="llama3-8b-8192", 
-            messages=dialog_history[user_id]
-        )
-        ai_text = completion.choices[0].message.content
-        return ai_text, is_girl
-    except Exception as e:
-        print(f"AI Error: {e}")
-        return "Привет! Давайте обсудим детали в личке.", is_girl
-
-# --- 4. WHATSAPP (WHAPI) ---
-def wa_loop():
-    if not WHAPI_TOKEN:
-        print("WA: No Token")
-        return
-    
-    print("📲 WhatsApp (Whapi) Monitoring Started")
-    last_msg_id = None
-    headers = {"Authorization": f"Bearer {WHAPI_TOKEN}"}
-    
-    while True:
-        try:
-            # Проверяем новые сообщения
-            r = requests.get("https://gate.whapi.cloud/messages?limit=1", headers=headers).json()
-            if 'messages' in r and r['messages']:
-                msg = r['messages'][0]
-                # Пропускаем свои сообщения и уже обработанные
-                if msg.get('from_me') or msg.get('id') == last_msg_id:
-                    time.sleep(3)
-                    continue
-                
-                last_msg_id = msg.get('id')
-                chat_id = msg.get('chat_id')
-                text = msg.get('text', {}).get('body')
-
-                if text:
-                    reply_text, _ = asyncio.run(get_ai_response(chat_id, text))
-                    requests.post(
-                        "https://gate.whapi.cloud/messages/text",
-                        json={"to": chat_id, "body": reply_text},
-                        headers=headers
-                    )
-        except Exception as e:
-            print(f"WA Error: {e}")
-        time.sleep(5)
-
-# --- 5. GMAIL ---
-def email_loop():
-    if not EMAIL_USER or not EMAIL_PASS:
-        print("Email: No Credentials")
-        return
-    
-    print("📧 Gmail Monitoring Started")
-    while True:
-        try:
-            mail = imaplib.IMAP4_SSL("imap.gmail.com")
-            mail.login(EMAIL_USER, EMAIL_PASS)
-            mail.select("inbox")
-            _, data = mail.search(None, 'UNSEEN')
-            
-            for num in data[0].split():
-                _, msg_data = mail.fetch(num, '(RFC822)')
-                msg = email.message_from_bytes(msg_data[0][1])
-                sender = email.utils.parseaddr(msg['From'])[1]
-                subject = msg.get('Subject', '')
-                
-                reply_text, _ = asyncio.run(get_ai_response(sender, subject))
-                
-                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
-                    smtp.login(EMAIL_USER, EMAIL_PASS)
-                    res = MIMEText(reply_text)
-                    res['Subject'] = f"Re: {subject}"
-                    res['To'] = sender
-                    res['From'] = EMAIL_USER
-                    smtp.sendmail(EMAIL_USER, sender, res.as_string())
-        except Exception as e:
-            print(f"Email Error: {e}")
-        time.sleep(30)
-
-# --- 6. TELEGRAM ---
+# --- ОБРАБОТКА TELEGRAM ---
 @tg_client.on(events.NewMessage)
-async def handle_tg(event):
-    if event.out: return
-    try:
-        sender = await event.get_sender()
-        reply, is_girl = await get_ai_response(sender.id, event.raw_text)
-        await event.respond(reply)
-
-# Находим этот блок в handle_tg и заменяем:
-        tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
+async def on_tg_message(event):
+    msg_text = event.raw_text.strip()
+    
+    # Если ты отправил точку "."
+    if event.out and msg_text == ".":
+        stats["dots_count"] += 1
+        await event.delete()
         
-        # Создаем ссылку на пользователя
-        user_link = f"[{sender.first_name}](tg://user?id={sender.id})"
-        if sender.username:
-            user_link = f"[@{sender.username}](https://t.me/{sender.username})"
+        # Уровень ИИ
+        lvl = "💎 Уровень 3: Максимум" if stats["tg_in"] > 50 else "⚡ Уровень 1: База"
+        
+        report = (
+            f"📈 **ОТЧЕТ ААРОНА**\n"
+            f"🧠 {lvl}\n"
+            f"━━━━━━━━━━━━━━\n"
+            f"📍 Твоих точек: {stats['dots_count']}\n"
+            f"💬 Сообщений: {stats['tg_in'] + stats['wa_in']}\n"
+            f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD\n"
+            f"🏍 Байков: {stats['bikes_found']}\n"
+            f"📧 Gmail: Активен\n"
+            f"━━━━━━━━━━━━━━"
+        )
+        await event.respond(report)
+        
+    elif not event.out and event.is_private:
+        stats["tg_in"] += 1
+        deep_analyze(msg_text)
 
-        await tg_client.send_message('me', f"🔥 {tag}\n👤: {user_link}\n💬: {event.raw_text}", link_preview=True)
+# --- ЗАПУСК СИСТЕМЫ ---
+async def start_aaron():
+    # Ждем ввода кода в переменную TG_CODE, чтобы Render не падал
+    while not os.environ.get('TG_CODE'):
+        print("⏳ Aaron ждет код в Environment Variables...")
+        await asyncio.sleep(20)
+        
+    await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
+    
+    if not wa_client.is_connected():
+        print(f"📲 ГЕНЕРАЦИЯ КОДА WHATSAPP...")
+        wa_client.pair_phone(PHONE)
+        
+    print("✅ ВСЕ СИСТЕМЫ ЗАПУЩЕНЫ")
+    await tg_client.run_until_disconnected()
 
-
-#       tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
-#      await tg_client.send_message('me', f"🔥 {tag}\n👤: {sender.first_name}\n💬: {event.raw_text}")
-    except errors.rpcerrorlist.SlowModeWaitError:
-        print("Slow mode active")
-    except Exception as e:
-        print(f"TG Error: {e}")
-
-# --- 7. ЗАПУСК ---
 if __name__ == '__main__':
-    threading.Thread(target=wa_loop, daemon=True).start()
-    threading.Thread(target=email_loop, daemon=True).start()
-    print("🚀 Bot Starting...")
-    tg_client.start()
-    tg_client.run_until_disconnected()
+    asyncio.run(start_aaron())
