@@ -1,7 +1,4 @@
 telethon
-groq
-requests
-six
 neonize
 openai
 google-api-python-client
