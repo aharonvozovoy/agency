@@ -5,6 +5,14 @@ from neonize.events import MessageEv
 from openai import OpenAI
 from googleapiclient.discovery import build
 
+def run_health_server():
+    # Render сам назначает порт, нам нужно его просто прочитать
+    port = int(os.environ.get("PORT", 8080)) 
+    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
+    print(f"🌍 Health check server started on port {port}")
+    server.serve_forever()
+
+
 # --- НАСТРОЙКИ (Твои данные) ---
 API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
