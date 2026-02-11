@@ -159,7 +159,7 @@ async def handle_tg(event):
         if sender.username:
             user_link = f"[@{sender.username}](https://t.me/{sender.username})"
 
-        await tg_client.send_message('me', f"🔥 {tag}\n👤: {user_link}\n💬: {event.raw_text}", link_preview=False)
+        await tg_client.send_message('me', f"🔥 {tag}\n👤: {user_link}\n💬: {event.raw_text}", link_preview=True)
 
 
 #       tag = "💎 VIP" if is_girl else "🛠 ЗАКАЗ"
