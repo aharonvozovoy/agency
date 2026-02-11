@@ -1,77 +1,55 @@
-import os, asyncio, threading, re, sys
+import os, asyncio, threading, re
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telethon import TelegramClient, events
-from neonize.client import NewClient
-from neonize.events import MessageEv
 
-# --- 1. СЕРВЕР (Чтобы Render видел порт 8080) ---
+# --- СЕРВЕР ДЛЯ RENDER ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron System: Online")
+        self.wfile.write(b"Aaron Online")
 
-def run_health_server():
+def run_server():
     port = int(os.environ.get("PORT", 8080))
-    server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
-    server.serve_forever()
+    HTTPServer(('0.0.0.0', port), HealthCheckHandler).serve_forever()
 
-# --- 2. НАСТРОЙКИ ---
+# --- НАСТРОЙКИ ---
 API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '+66618169428' # Добавил + для надежности
+PHONE = '+66618169428'
 
-# Новое имя сессии для чистого запуска
-tg_client = TelegramClient('aaron_final_v3', API_ID, API_HASH)
-wa_client = NewClient("db.sqlite3")
+# Меняем имя сессии на уникальное для этого запуска
+client = TelegramClient('aaron_cloud_v4', API_ID, API_HASH)
 
-stats = {"dots": 0, "tg_in": 0}
+@client.on(events.NewMessage(outgoing=True, pattern=r'^\.$'))
+async def handle_dot(event):
+    await event.delete()
+    await event.respond("📈 **Аарон в сети!**\nВсе системы работают в облаке.")
 
-# --- 3. ОБРАБОТЧИКИ ---
-@tg_client.on(events.NewMessage)
-async def handle_tg(event):
-    if event.out and event.raw_text.strip() == ".":
-        stats["dots"] += 1
-        await event.delete()
-        await event.respond(f"📈 **ОТЧЕТ**\n📍 Точек: {stats['dots']}")
-
-# --- 4. ГЛАВНЫЙ ЗАПУСК ---
-async def start_system():
-    # Сразу запускаем сервер
-    threading.Thread(target=run_health_server, daemon=True).start()
-    print("🌍 Health check server started!")
-
-    # Ждем код в Environment Variables
-    while not os.environ.get('TG_CODE'):
-        print("⏳ Ожидание кода в переменной TG_CODE...")
-        # Пытаемся инициировать запрос кода, если его еще нет
-        if not hasattr(tg_client, '_code_requested'):
-            try:
-                await tg_client.connect()
-                # Запрашиваем код (сначала в приложение, потом SMS)
-                await tg_client.send_code_request(PHONE)
-                tg_client._code_requested = True
-                print("📩 Код запрошен! Проверь Telegram или SMS.")
-            except Exception as e:
-                print(f"⚠️ Ошибка запроса: {e}")
-        await asyncio.sleep(20)
-
-    # Когда код появился в TG_CODE — входим
-    try:
-        code = os.environ.get('TG_CODE').strip()
-        await tg_client.start(phone=PHONE, code_callback=lambda: code)
-        print("✅ Telegram подключен!")
-    except Exception as e:
-        print(f"❌ Ошибка авторизации: {e}")
-        return
-
-    if not wa_client.is_connected():
-        wa_client.pair_phone(PHONE)
+async def main():
+    threading.Thread(target=run_server, daemon=True).start()
+    
+    await client.connect()
+    
+    if not await client.is_user_authorized():
+        print(f"📡 Запрашиваю код для {PHONE}...")
+        await client.send_code_request(PHONE)
         
-    await tg_client.run_until_disconnected()
+        # Ждем, пока ты впишешь код в Render
+        while not os.environ.get('TG_CODE'):
+            print("⏳ Жду код в переменной TG_CODE на Render...")
+            await asyncio.sleep(15)
+        
+        try:
+            code = os.environ.get('TG_CODE').strip()
+            await client.sign_in(PHONE, code)
+            print("✅ Вход выполнен!")
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
+            return
+
+    print("🚀 Аарон полностью запущен!")
+    await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    try:
-        asyncio.run(start_system())
-    except KeyboardInterrupt:
-        pass
+    asyncio.run(main())
