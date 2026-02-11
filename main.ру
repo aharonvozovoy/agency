@@ -1,117 +1,98 @@
 import os, asyncio, threading, re
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telethon import TelegramClient, events
 from neonize.client import NewClient
 from neonize.events import MessageEv
 from openai import OpenAI
-from googleapiclient.discovery import build
+
+# --- 1. СЕРВЕР ДЛЯ RENDER (Запуск ПЕРВЫМ) ---
+class HealthCheckHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Aaron System: Online and Waiting for Code")
 
 def run_health_server():
-    # Render сам назначает порт, нам нужно его просто прочитать
-    port = int(os.environ.get("PORT", 8080)) 
+    # Render автоматически назначает порт
+    port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), HealthCheckHandler)
     print(f"🌍 Health check server started on port {port}")
     server.serve_forever()
 
-async def start_system():
-    # 1. Сначала запускаем сервер, чтобы Render успокоился
-    threading.Thread(target=run_health_server, daemon=True).start()
-    print("🌍 Health check server started!")
-
-    # 2. А теперь ждем код
-    while not os.environ.get('TG_CODE'):
-        print("⏳ Ожидание кода авторизации в Render...")
-        await asyncio.sleep(20)
-    
-    # ... остальной код ...
-
-
-
-# --- НАСТРОЙКИ (Твои данные) ---
+# --- 2. НАСТРОЙКИ ---
 API_ID = 30893125 
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '66618169428'
 
-# ГРОК (xAI) - Ключ берем из настроек Render
+# Грок
 XAI_API_KEY = os.environ.get("XAI_API_KEY")
 client_grok = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
 
 tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
 wa_client = NewClient("db.sqlite3")
 
-# Статистика (Точки, Деньги, Байки)
-stats = {
-    "tg_in": 0, "wa_in": 0, 
-    "dots_count": 0, 
-    "money_thb": 0, "money_usd": 0,
-    "bikes_found": 0
-}
+stats = {"tg_in": 0, "wa_in": 0, "dots": 0, "thb": 0, "usd": 0, "bikes": 0}
 
-# Логика анализа текста
+# --- 3. ЛОГИКА АНАЛИЗА ---
 def deep_analyze(text):
     text = text.lower()
-    # Поиск байков
     bikes = ["pcx", "nmax", "forza", "xmax", "click", "adv"]
     for bike in bikes:
-        if bike in text: stats["bikes_found"] += 1
-    # Расчет валют
-    stats["money_thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
-    stats["money_usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd|дол)', text))
+        if bike in text: stats["bikes"] += 1
+    stats["thb"] += sum(int(m[0]) for m in re.findall(r'(\d{2,6})\s?(thb|бат)', text))
+    stats["usd"] += sum(int(m[0]) for m in re.findall(r'(\d{1,5})\s?(\$|usd|дол)', text))
 
-# --- ОБРАБОТКА WHATSAPP ---
+# --- 4. ОБРАБОТЧИКИ (Точки и Сообщения) ---
 @wa_client.event(MessageEv)
-def on_wa_message(client, message: MessageEv):
-    msg_text = (message.Message.conversation or "").strip()
+def on_wa(client, message: MessageEv):
+    text = (message.Message.conversation or "").strip()
     if not message.Info.FromMe:
         stats["wa_in"] += 1
-        deep_analyze(msg_text)
-    elif msg_text == ".":
-        stats["dots_count"] += 1 # Считаем точки в WA
+        deep_analyze(text)
+    elif text == ".":
+        stats["dots"] += 1
 
-# --- ОБРАБОТКА TELEGRAM ---
 @tg_client.on(events.NewMessage)
-async def on_tg_message(event):
-    msg_text = event.raw_text.strip()
-    
-    # Если ты отправил точку "."
-    if event.out and msg_text == ".":
-        stats["dots_count"] += 1
+async def on_tg(event):
+    if event.out and event.raw_text.strip() == ".":
+        stats["dots"] += 1
         await event.delete()
-        
-        # Уровень ИИ
-        lvl = "💎 Уровень 3: Максимум" if stats["tg_in"] > 50 else "⚡ Уровень 1: База"
-        
+        lvl = "💎 Уровень 3" if stats["tg_in"] > 50 else "⚡ Уровень 1"
         report = (
-            f"📈 **ОТЧЕТ ААРОНА**\n"
-            f"🧠 {lvl}\n"
-            f"━━━━━━━━━━━━━━\n"
-            f"📍 Твоих точек: {stats['dots_count']}\n"
-            f"💬 Сообщений: {stats['tg_in'] + stats['wa_in']}\n"
-            f"💰 Касса: {stats['money_thb']} THB / {stats['money_usd']} USD\n"
-            f"🏍 Байков: {stats['bikes_found']}\n"
-            f"📧 Gmail: Активен\n"
-            f"━━━━━━━━━━━━━━"
+            f"📈 **ОТЧЕТ ААРОНА**\n🧠 {lvl}\n━━━━━━━━━━━━━━\n"
+            f"📍 Твоих точек: {stats['dots']}\n"
+            f"💰 Касса: {stats['thb']} THB / {stats['usd']} USD\n"
+            f"🏍 Байков: {stats['bikes']}\n━━━━━━━━━━━━━━"
         )
         await event.respond(report)
-        
     elif not event.out and event.is_private:
         stats["tg_in"] += 1
-        deep_analyze(msg_text)
+        deep_analyze(event.raw_text)
 
-# --- ЗАПУСК СИСТЕМЫ ---
-async def start_aaron():
-    # Ждем ввода кода в переменную TG_CODE, чтобы Render не падал
-    while not os.environ.get('TG_CODE'):
-        print("⏳ Aaron ждет код в Environment Variables...")
-        await asyncio.sleep(20)
-        
-    await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
+# --- 5. ГЛАВНЫЙ ЗАПУСК ---
+async def start_system():
+    # ШАГ 1: Сразу запускаем сервер, чтобы Render не выдавал ошибку порта
+    threading.Thread(target=run_health_server, daemon=True).start()
     
+    print("⏳ Сервер активен. Ожидание кода TG_CODE в настройках Render...")
+    
+    # ШАГ 2: Ждем код от пользователя
+    while not os.environ.get('TG_CODE'):
+        await asyncio.sleep(15)
+    
+    # ШАГ 3: Авторизация
+    try:
+        await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
+        print("✅ Telegram подключен!")
+    except Exception as e:
+        print(f"❌ Ошибка входа: {e}")
+        return
+
     if not wa_client.is_connected():
-        print(f"📲 ГЕНЕРАЦИЯ КОДА WHATSAPP...")
+        print(f"📲 КОД WHATSAPP ДЛЯ {PHONE}...")
         wa_client.pair_phone(PHONE)
         
-    print("✅ ВСЕ СИСТЕМЫ ЗАПУЩЕНЫ")
     await tg_client.run_until_disconnected()
 
 if __name__ == '__main__':
-    asyncio.run(start_aaron())
+    asyncio.run(start_system())
