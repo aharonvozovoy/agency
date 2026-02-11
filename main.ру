@@ -81,18 +81,16 @@ async def start_system():
         await asyncio.sleep(15)
     
     # ШАГ 3: Авторизация
+        # ШАГ 3: Авторизация (с принудительным запросом кода)
     try:
+        # Мы добавляем force_sms=True, чтобы Telegram выслал SMS, если чат молчит
+        await tg_client.sign_in(phone=PHONE) 
+        print("📲 Запрос отправлен! Проверь чат Telegram или SMS.")
+        
+        while not os.environ.get('TG_CODE'):
+            await asyncio.sleep(10)
+            
         await tg_client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
         print("✅ Telegram подключен!")
     except Exception as e:
         print(f"❌ Ошибка входа: {e}")
-        return
-
-    if not wa_client.is_connected():
-        print(f"📲 КОД WHATSAPP ДЛЯ {PHONE}...")
-        wa_client.pair_phone(PHONE)
-        
-    await tg_client.run_until_disconnected()
-
-if __name__ == '__main__':
-    asyncio.run(start_system())
