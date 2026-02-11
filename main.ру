@@ -12,6 +12,19 @@ def run_health_server():
     print(f"🌍 Health check server started on port {port}")
     server.serve_forever()
 
+async def start_system():
+    # 1. Сначала запускаем сервер, чтобы Render успокоился
+    threading.Thread(target=run_health_server, daemon=True).start()
+    print("🌍 Health check server started!")
+
+    # 2. А теперь ждем код
+    while not os.environ.get('TG_CODE'):
+        print("⏳ Ожидание кода авторизации в Render...")
+        await asyncio.sleep(20)
+    
+    # ... остальной код ...
+
+
 
 # --- НАСТРОЙКИ (Твои данные) ---
 API_ID = 30893125 
