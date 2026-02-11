@@ -28,7 +28,7 @@ PHONE = '66618169428'
 XAI_API_KEY = os.environ.get("XAI_API_KEY")
 client_grok = OpenAI(api_key=XAI_API_KEY, base_url="https://api.x.ai/v1")
 
-tg_client = TelegramClient('aaron_session', API_ID, API_HASH)
+tg_client = TelegramClient('aaron_new_start', API_ID, API_HASH)
 wa_client = NewClient("db.sqlite3")
 
 stats = {"tg_in": 0, "wa_in": 0, "dots": 0, "thb": 0, "usd": 0, "bikes": 0}
