@@ -2,31 +2,43 @@ import os
 import asyncio
 from telethon import TelegramClient
 
-# Получаем данные
-api_id = os.environ.get('TG_API_ID')
-api_hash = os.environ.get('TG_API_HASH')
-phone = os.environ.get('TG_PHONE')
-code = os.environ.get('TG_CODE')
+# Твои данные жестко вписаны, чтобы Render их точно "увидел"
+API_ID = 26521743
+API_HASH = '1f67f677d337d456722c8335508c909c'
+PHONE = '+79870346313'
 
-client = TelegramClient('session_aaron', api_id, api_hash)
+# Код подтверждения по-прежнему берем из настроек Render (TG_CODE)
+TG_CODE = os.environ.get('TG_CODE')
+
+client = TelegramClient('session_aaron', API_ID, API_HASH)
 
 async def main():
-    print("--- Попытка подключения к Telegram ---")
+    print("--- ЗАПУСК ААРОНА ---")
     await client.connect()
     
     if not await client.is_user_authorized():
-        print(f"Аккаунт {phone} не авторизован.")
-        if not code:
-            print("ЗАПРОС КОДА: Сейчас отправлю код на твой телефон...")
-            await client.send_code_request(phone)
-            print("КОД ОТПРАВЛЕН! Впиши его в переменную TG_CODE в Render и нажми Save.")
+        print(f"Авторизация для номера: {PHONE}")
+        
+        if not TG_CODE:
+            print("---------------------------------------------------------")
+            print("ЗАПРОС КОДА: Сейчас Telegram пришлет тебе код в приложение.")
+            print("1. Получи код (5 цифр).")
+            print("2. Впиши его в Render в переменную TG_CODE.")
+            print("3. Нажми Save.")
+            print("---------------------------------------------------------")
+            await client.send_code_request(PHONE)
         else:
-            print(f"ПРОБУЮ КОД: {code}")
-            await client.sign_in(phone, code)
-            print("✅ УСПЕХ! Бот залогинился.")
+            try:
+                print(f"Пытаюсь войти с кодом из Render: {TG_CODE}")
+                await client.sign_in(PHONE, TG_CODE)
+                print("✅ УСПЕШНЫЙ ВХОД! Бот теперь работает.")
+            except Exception as e:
+                print(f"❌ Ошибка входа: {e}")
+                print("Скорее всего, код устарел. Удали значение TG_CODE в Render и начни заново.")
     else:
-        print("✅ Бот уже авторизован и работает!")
+        print("✅ Бот уже авторизован и активен в облаке!")
 
+    # Поддерживаем работу скрипта
     while True:
         await asyncio.sleep(1000)
 
