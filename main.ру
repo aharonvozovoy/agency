@@ -1,6 +1,7 @@
 import os
 import asyncio
 from telethon import TelegramClient, events
+from telethon.sessions import StringSession
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -8,16 +9,19 @@ import threading
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
+
+# ТЕПЕРЬ МЫ ИЩЕМ ТЕКСТОВУЮ СЕССИЮ
+SESSION_STR = os.environ.get('TG_SESSION')
 TG_CODE = os.environ.get('TG_CODE')
 
-client = TelegramClient('session_v3', API_ID, API_HASH)
+# Используем StringSession вместо файла
+client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Waiting for code...")
-    def log_message(self, format, *args): return
+        self.wfile.write(b"Aaron is running")
 
 def run_web_server():
     server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
@@ -26,28 +30,25 @@ def run_web_server():
 @client.on(events.NewMessage(outgoing=True))
 async def action_handler(event):
     if event.raw_text == '.':
-        await event.edit("🚀 **Аарон в сети!**")
+        await event.edit("🚀 **Аарон в сети вечно!**")
 
 async def main():
-    print("--- ЗАПУСК СИСТЕМЫ ---")
     await client.connect()
     
     if not await client.is_user_authorized():
         if not TG_CODE:
-            print(">>> ШАГ 1: ЗАПРОС КОДА (ОДНОКРАТНО) <<<")
+            print(">>> СЕССИЯ НЕ НАЙДЕНА. ЗАПРОС КОДА...")
             await client.send_code_request(PHONE)
-            print("✅ КОД ОТПРАВЛЕН! У тебя есть 10 минут, чтобы ввести его в TG_CODE.")
-            # ЗАМИРАЕМ, чтобы Render не перезапускал бота
-            await asyncio.sleep(600) 
+            await asyncio.sleep(600)
         else:
-            print(f">>> ШАГ 2: ВХОД С КОДОМ {TG_CODE} <<<")
-            try:
-                await client.sign_in(PHONE, TG_CODE.strip())
-                print("✅✅✅ УСПЕХ! БОТ АВТОРИЗОВАН.")
-            except Exception as e:
-                print(f"❌ ОШИБКА: {e}. Очисти TG_CODE и попробуй снова.")
+            print(f">>> ВХОД С КОДОМ {TG_CODE}...")
+            await client.sign_in(PHONE, TG_CODE.strip())
+            # ГЛАВНЫЙ МОМЕНТ:
+            print("\n🆘 СКОПИРУЙ ЭТУ СТРОКУ И ВСТАВЬ В TG_SESSION В RENDER: 🆘")
+            print(client.session.save())
+            print("\n--- ПОСЛЕ ЭТОГО БОТ БОЛЬШЕ НЕ ПОПРОСИТ КОД ---")
     else:
-        print("✅ БОТ УЖЕ РАБОТАЕТ")
+        print("✅ АВТОРИЗАЦИЯ ПРОШЛА УСПЕШНО (ЧЕРЕЗ TG_SESSION)")
 
     await client.run_until_disconnected()
 
