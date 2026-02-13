@@ -1,6 +1,6 @@
 import os
 import asyncio
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
@@ -8,44 +8,36 @@ import threading
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
-TG_CODE = os.environ.get('TG_CODE')
 
 client = TelegramClient('session_aaron', API_ID, API_HASH)
 
-# Веб-сервер для Render (порт 10000 или из настроек)
+# Веб-сервер для Render (чтобы статус был Live)
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is Running")
-    def do_HEAD(self):
-        self.send_response(200)
-        self.end_headers()
+        self.wfile.write(b"Aaron is Online")
 
 def run_port_server():
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(('0.0.0.0', port), SimpleHandler)
     server.serve_forever()
 
+# --- КОМАНДЫ БОТА ---
+@client.on(events.NewMessage(pattern=r'^\.$', outgoing=True))
+async def handler(event):
+    await event.edit("🚀 **Аарон на связи!**\nСистема работает в облаке Render.")
+
 async def main():
-    print("--- ЗАПУСК ААРОНА (FINAL) ---")
+    print("--- ЗАПУСК ААРОНА ---")
     await client.connect()
     
     if not await client.is_user_authorized():
-        if TG_CODE:
-            print(f">>> ПРОБУЮ ВОЙТИ С КОДОМ: {TG_CODE}")
-            try:
-                await client.sign_in(PHONE, TG_CODE.strip())
-                print("✅✅✅ УСПЕХ! БОТ АВТОРИЗОВАН!")
-            except Exception as e:
-                print(f"❌ ОШИБКА: {e}")
-        else:
-            print("⚠️ КОД НЕ НАЙДЕН в TG_CODE. Впиши его в Render.")
-    else:
-        print("✅ БОТ УЖЕ В СЕТИ!")
+        print("❌ ОШИБКА: Нужно снова авторизоваться. Проверь TG_CODE.")
+        return
 
-    while True:
-        await asyncio.sleep(1000)
+    print("✅ БОТ ПОДКЛЮЧЕН И ЖДЕТ ТОЧКУ")
+    await client.run_until_disconnected()
 
 if __name__ == '__main__':
     threading.Thread(target=run_port_server, daemon=True).start()
