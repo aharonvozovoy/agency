@@ -4,48 +4,63 @@ from telethon import TelegramClient, events
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# ТВОИ ДАННЫЕ
+# --- ТВОИ ДАННЫЕ ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
 
-client = TelegramClient('session_aaron', API_ID, API_HASH)
+# Берем код из переменных Render
+TG_CODE = os.environ.get('TG_CODE')
 
-# Веб-сервер специально для порта 8080
+# Новое имя сессии для чистого запуска
+client = TelegramClient('session_v2', API_ID, API_HASH)
+
+# Веб-сервер для Render (порт 8080)
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is alive on 8080")
+        self.wfile.write(b"Aaron is alive")
     def log_message(self, format, *args): return
 
 def run_web_server():
-    # Мы жестко прописываем 8080, раз Render его просит
     port = 8080
     server = HTTPServer(('0.0.0.0', port), HealthHandler)
     print(f"--- ВЕБ-СЕРВЕР ПОДНЯТ НА ПОРТУ {port} ---")
     server.serve_forever()
 
-# ОБРАБОТЧИК ТОЧКИ
+# ОБРАБОТЧИК СООБЩЕНИЙ
 @client.on(events.NewMessage(outgoing=True))
 async def action_handler(event):
     if event.raw_text == '.':
-        print(">>> ТОЧКА ОБНАРУЖЕНА! МЕНЯЮ ТЕКСТ...")
-        await event.edit("🚀 **Аарон запущен!**\nСвязь через порт 8080 установлена.")
+        print(">>> ТОЧКА ОБНАРУЖЕНА!")
+        await event.edit("🚀 **Аарон работает!**\nСессия v2 активна.")
 
 async def main():
     print("--- ПОДКЛЮЧЕНИЕ К TELEGRAM ---")
     await client.connect()
     
-    if not await client.is_user_authorized():
-        print("❌ ОШИБКА: Авторизация не удалась.")
-        return
+    authorized = await client.is_user_authorized()
+    
+    if not authorized:
+        if not TG_CODE or TG_CODE.strip() == "":
+            print(">>> ШАГ 1: Запрашиваю НОВЫЙ код в Telegram...")
+            await client.send_code_request(PHONE)
+            print("✅ КОД ОТПРАВЛЕН! Впиши его в TG_CODE в Render и нажми Save.")
+        else:
+            print(f">>> ШАГ 2: Пробую войти с кодом: {TG_CODE}")
+            try:
+                await client.sign_in(PHONE, TG_CODE.strip())
+                print("✅✅✅ УСПЕХ! Аарон авторизован.")
+            except Exception as e:
+                print(f"❌ ОШИБКА ВХОДА: {e}")
+                print("Совет: Очисти TG_CODE и попробуй снова.")
+                return
+    else:
+        print("✅ БОТ УЖЕ В СЕТИ")
 
-    print("✅✅✅ БОТ В СЕТИ И ГОТОВ К РАБОТЕ")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Запускаем сервер порта 8080
     threading.Thread(target=run_web_server, daemon=True).start()
-    # Запускаем Телеграм
     asyncio.run(main())
