@@ -3,41 +3,51 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
-# ДАННЫЕ
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
 
-# Переменные из Render
+# Проверка сессии
 SESSION_STR = os.environ.get('TG_SESSION')
-TG_CODE = os.environ.get('TG_CODE')
-
-# Если есть готовая сессия - используем её, если нет - создаем пустую
-client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Waiting for session string...")
+        self.wfile.write(b"Bot is waiting for session...")
 
 async def main():
-    await client.connect()
-    
-    if not await client.is_user_authorized():
-        if not TG_CODE:
-            print(">>> ШАГ 1: ЗАПРОС КОДА. Впиши его в TG_CODE и нажми Save.")
-            await client.send_code_request(PHONE)
-            # Замираем, чтобы Render не убил процесс сразу
-            await asyncio.sleep(600)
-        else:
-            print(f">>> ШАГ 2: ВХОД С КОДОМ {TG_CODE}")
-            await client.sign_in(PHONE, TG_CODE.strip())
-            print("\n🆘 СКОПИРУЙ ЭТУ СТРОКУ В TG_SESSION ПРЯМО СЕЙЧАС: 🆘")
-            print(client.session.save())
-            print("\n-------------------------------------------")
+    # Если сессия уже есть, просто запускаемся
+    if SESSION_STR:
+        client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+        await client.start()
+        print("✅ ААРОН ЗАПУЩЕН ЧЕРЕЗ TG_SESSION")
     else:
-        print("✅ БОТ РАБОТАЕТ ЧЕРЕЗ СЕССИЮ!")
+        # Если сессии нет, создаем временного клиента для её получения
+        client = TelegramClient(StringSession(), API_ID, API_HASH)
+        await client.connect()
+        
+        print(">>> ШАГ 1: ЗАПРОС КОДА...")
+        sent = await client.send_code_request(PHONE)
+        
+        print("🆘 ВНИМАНИЕ: У тебя есть 5 минут! 🆘")
+        print("1. Дождись код в ТГ.")
+        print("2. Впиши его в TG_CODE в Render и нажми Save.")
+        
+        # Ждем появления кода в переменных среды БЕЗ перезапуска
+        for _ in range(60): 
+            await asyncio.sleep(10)
+            check_code = os.environ.get('TG_CODE')
+            if check_code:
+                print(f">>> ПРОБУЮ ВХОД С КОДОМ: {check_code}")
+                try:
+                    await client.sign_in(PHONE, check_code, phone_code_hash=sent.phone_code_hash)
+                    print("\n🔥 УСПЕХ! ТВОЯ СЕССИЯ НИЖЕ (СКОПИРУЙ ВСЁ): 🔥")
+                    print(client.session.save())
+                    print("\n-------------------------------------------")
+                    break
+                except Exception as e:
+                    print(f"❌ Ошибка: {e}")
 
     @client.on(events.NewMessage(outgoing=True))
     async def handler(event):
