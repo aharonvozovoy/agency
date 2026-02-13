@@ -5,53 +5,40 @@ from telethon.sessions import StringSession
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# --- ДАННЫЕ ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
 
-# ТЕПЕРЬ МЫ ИЩЕМ ТЕКСТОВУЮ СЕССИЮ
+# Пробуем взять готовую сессию
 SESSION_STR = os.environ.get('TG_SESSION')
-TG_CODE = os.environ.get('TG_CODE')
-
-# Используем StringSession вместо файла
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is running")
-
-def run_web_server():
-    server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
-    server.serve_forever()
-
-@client.on(events.NewMessage(outgoing=True))
-async def action_handler(event):
-    if event.raw_text == '.':
-        await event.edit("🚀 **Аарон в сети вечно!**")
+        self.wfile.write(b"Aaron is waiting for login...")
 
 async def main():
     await client.connect()
-    
     if not await client.is_user_authorized():
-        if not TG_CODE:
-            print(">>> СЕССИЯ НЕ НАЙДЕНА. ЗАПРОС КОДА...")
-            await client.send_code_request(PHONE)
-            await asyncio.sleep(600)
-        else:
-            print(f">>> ВХОД С КОДОМ {TG_CODE}...")
-            await client.sign_in(PHONE, TG_CODE.strip())
-            # ГЛАВНЫЙ МОМЕНТ:
-            print("\n🆘 СКОПИРУЙ ЭТУ СТРОКУ И ВСТАВЬ В TG_SESSION В RENDER: 🆘")
-            print(client.session.save())
-            print("\n--- ПОСЛЕ ЭТОГО БОТ БОЛЬШЕ НЕ ПОПРОСИТ КОД ---")
+        print(">>> СЕССИЯ НЕ НАЙДЕНА. НАЧИНАЮ ВХОД...")
+        # Метод start сам проверит наличие кода в переменных или запросит его
+        # ВАЖНО: он будет ждать, пока ты впишешь код в TG_CODE и перезапустишь
+        await client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
+        
+        print("\n🆘 УСПЕХ! СКОПИРУЙ ЭТУ СТРОКУ В TG_SESSION: 🆘")
+        print(client.session.save())
+        print("\n-------------------------------------------")
     else:
-        print("✅ АВТОРИЗАЦИЯ ПРОШЛА УСПЕШНО (ЧЕРЕЗ TG_SESSION)")
+        print("✅ БОТ АВТОРИЗОВАН И РАБОТАЕТ!")
+
+    @client.on(events.NewMessage(outgoing=True))
+    async def handler(event):
+        if event.raw_text == '.': await event.edit("🚀 Аарон в сети!")
 
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    threading.Thread(target=run_web_server, daemon=True).start()
+    threading.Thread(target=lambda: HTTPServer(('0.0.0.0', 8080), HealthHandler).serve_forever(), daemon=True).start()
     asyncio.run(main())
