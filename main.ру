@@ -1,37 +1,43 @@
-import os
-import asyncio
+import os, asyncio, threading
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from http.server import HTTPServer, BaseHTTPRequestHandler
-import threading
 
+# ДАННЫЕ
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
 
-# Пробуем взять готовую сессию
+# Переменные из Render
 SESSION_STR = os.environ.get('TG_SESSION')
+TG_CODE = os.environ.get('TG_CODE')
+
+# Если есть готовая сессия - используем её, если нет - создаем пустую
 client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is waiting for login...")
+        self.wfile.write(b"Waiting for session string...")
 
 async def main():
     await client.connect()
+    
     if not await client.is_user_authorized():
-        print(">>> СЕССИЯ НЕ НАЙДЕНА. НАЧИНАЮ ВХОД...")
-        # Метод start сам проверит наличие кода в переменных или запросит его
-        # ВАЖНО: он будет ждать, пока ты впишешь код в TG_CODE и перезапустишь
-        await client.start(phone=PHONE, code_callback=lambda: os.environ.get('TG_CODE'))
-        
-        print("\n🆘 УСПЕХ! СКОПИРУЙ ЭТУ СТРОКУ В TG_SESSION: 🆘")
-        print(client.session.save())
-        print("\n-------------------------------------------")
+        if not TG_CODE:
+            print(">>> ШАГ 1: ЗАПРОС КОДА. Впиши его в TG_CODE и нажми Save.")
+            await client.send_code_request(PHONE)
+            # Замираем, чтобы Render не убил процесс сразу
+            await asyncio.sleep(600)
+        else:
+            print(f">>> ШАГ 2: ВХОД С КОДОМ {TG_CODE}")
+            await client.sign_in(PHONE, TG_CODE.strip())
+            print("\n🆘 СКОПИРУЙ ЭТУ СТРОКУ В TG_SESSION ПРЯМО СЕЙЧАС: 🆘")
+            print(client.session.save())
+            print("\n-------------------------------------------")
     else:
-        print("✅ БОТ АВТОРИЗОВАН И РАБОТАЕТ!")
+        print("✅ БОТ РАБОТАЕТ ЧЕРЕЗ СЕССИЮ!")
 
     @client.on(events.NewMessage(outgoing=True))
     async def handler(event):
