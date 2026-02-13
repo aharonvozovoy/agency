@@ -11,34 +11,41 @@ PHONE = '+66618169428'
 
 client = TelegramClient('session_aaron', API_ID, API_HASH)
 
-# Веб-сервер для Render (чтобы статус был Live)
-class SimpleHandler(BaseHTTPRequestHandler):
+# Веб-сервер специально для порта 8080
+class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is Online")
+        self.wfile.write(b"Aaron is alive on 8080")
+    def log_message(self, format, *args): return
 
-def run_port_server():
-    port = int(os.environ.get("PORT", 10000))
-    server = HTTPServer(('0.0.0.0', port), SimpleHandler)
+def run_web_server():
+    # Мы жестко прописываем 8080, раз Render его просит
+    port = 8080
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    print(f"--- ВЕБ-СЕРВЕР ПОДНЯТ НА ПОРТУ {port} ---")
     server.serve_forever()
 
-# --- КОМАНДЫ БОТА ---
-@client.on(events.NewMessage(pattern=r'^\.$', outgoing=True))
-async def handler(event):
-    await event.edit("🚀 **Аарон на связи!**\nСистема работает в облаке Render.")
+# ОБРАБОТЧИК ТОЧКИ
+@client.on(events.NewMessage(outgoing=True))
+async def action_handler(event):
+    if event.raw_text == '.':
+        print(">>> ТОЧКА ОБНАРУЖЕНА! МЕНЯЮ ТЕКСТ...")
+        await event.edit("🚀 **Аарон запущен!**\nСвязь через порт 8080 установлена.")
 
 async def main():
-    print("--- ЗАПУСК ААРОНА ---")
+    print("--- ПОДКЛЮЧЕНИЕ К TELEGRAM ---")
     await client.connect()
     
     if not await client.is_user_authorized():
-        print("❌ ОШИБКА: Нужно снова авторизоваться. Проверь TG_CODE.")
+        print("❌ ОШИБКА: Авторизация не удалась.")
         return
 
-    print("✅ БОТ ПОДКЛЮЧЕН И ЖДЕТ ТОЧКУ")
+    print("✅✅✅ БОТ В СЕТИ И ГОТОВ К РАБОТЕ")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    threading.Thread(target=run_port_server, daemon=True).start()
+    # Запускаем сервер порта 8080
+    threading.Thread(target=run_web_server, daemon=True).start()
+    # Запускаем Телеграм
     asyncio.run(main())
