@@ -4,17 +4,17 @@ from telethon import TelegramClient
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# ОБНОВЛЕННЫЕ ДАННЫЕ
+# ТВОИ ДАННЫЕ
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '+66618169428' # Твой актуальный номер
+PHONE = '+66618169428'
 
-# Код подтверждения берем из переменной TG_CODE в Render
+# Берем код из настроек Render
 TG_CODE = os.environ.get('TG_CODE')
 
 client = TelegramClient('session_aaron', API_ID, API_HASH)
 
-# Заглушка для порта Render
+# Заглушка для Render, чтобы он не ругался на порты
 def run_port_server():
     try:
         server = HTTPServer(('0.0.0.0', 10000), type('H', (BaseHTTPRequestHandler,), {'do_GET': lambda s: (s.send_response(200), s.end_headers())}))
@@ -22,32 +22,30 @@ def run_port_server():
     except: pass
 
 async def main():
-    print("--- ЗАПУСК СИСТЕМЫ (AARON) ---")
+    print("--- ЗАПУСК ААРОНА (БЕЗОПАСНЫЙ РЕЖИМ) ---")
     await client.connect()
 
     if not await client.is_user_authorized():
-        # Если кода в Render нет — запрашиваем
-        if not TG_CODE or TG_CODE.strip() == "":
-            print(f">>> ОТПРАВЛЯЮ ЗАПРОС НА НОМЕР: {PHONE}")
+        if TG_CODE and TG_CODE.strip() != "":
+            print(f">>> ОБНАРУЖЕН КОД В НАСТРОЙКАХ: {TG_CODE}")
             try:
-                await client.send_code_request(PHONE)
-                print("✅ КОД ОТПРАВЛЕН! Проверь свой Telegram.")
-            except Exception as e:
-                print(f"❌ Ошибка запроса: {e}")
-        else:
-            # Если ты уже вписал код в Render — входим
-            try:
-                print(f">>> ПРОБУЮ ВОЙТИ С КОДОМ: {TG_CODE}")
+                # Пытаемся войти с тем, что ты вписал
                 await client.sign_in(PHONE, TG_CODE.strip())
-                print("✅✅✅ УСПЕХ! Аарон активен и готов к работе.")
+                print("✅✅✅ ПОБЕДА! Аарон успешно авторизован и работает.")
             except Exception as e:
-                print(f"❌ Ошибка входа: {e}")
-                print("Совет: Очисти TG_CODE в Render, нажми Save и попробуй заново.")
+                print(f"❌ ОШИБКА ВХОДА: {e}")
+                print("Возможно, код устарел или неверный. Удали его из настроек, чтобы попробовать снова.")
+        else:
+            print("⚠️ КОД НЕ НАЙДЕН в настройках Render (переменная TG_CODE пуста).")
+            print("Бот ничего не запрашивает, чтобы не спамить. Впиши код и перезапусти.")
     else:
-        print("✅ СТАТУС: Бот уже авторизован и работает!")
+        print("✅ СТАТУС: Бот уже авторизован и активен!")
 
-    while True: await asyncio.sleep(1000)
+    # Держим бота запущенным
+    while True:
+        await asyncio.sleep(1000)
 
 if __name__ == '__main__':
+    # Запускаем сервер порта в отдельном потоке
     threading.Thread(target=run_port_server, daemon=True).start()
     asyncio.run(main())
