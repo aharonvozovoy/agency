@@ -1,54 +1,46 @@
-import os, asyncio, threading, re
-from http.server import HTTPServer, BaseHTTPRequestHandler
+import os
+import asyncio
 from telethon import TelegramClient, events
 
-# --- СЕРВЕР ДЛЯ RENDER ---
-class HealthCheckHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"Aaron Online")
+# Берем данные из настроек Render
+API_ID = os.environ.get('TG_API_ID')
+API_HASH = os.environ.get('TG_API_HASH')
+PHONE = os.environ.get('TG_PHONE')
+TG_CODE = os.environ.get('TG_CODE')
 
-def run_server():
-    port = int(os.environ.get("PORT", 8080))
-    HTTPServer(('0.0.0.0', port), HealthCheckHandler).serve_forever()
-
-# --- НАСТРОЙКИ ---
-API_ID = 30893125 
-API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '+66618169428'
-
-# Меняем имя сессии на уникальное для этого запуска
-client = TelegramClient('aaron_cloud_v4', API_ID, API_HASH)
-
-@client.on(events.NewMessage(outgoing=True, pattern=r'^\.$'))
-async def handle_dot(event):
-    await event.delete()
-    await event.respond("📈 **Аарон в сети!**\nВсе системы работают в облаке.")
+client = TelegramClient('session_aaron', API_ID, API_HASH)
 
 async def main():
-    threading.Thread(target=run_server, daemon=True).start()
+    print("--- Аарон запускается ---")
     
     await client.connect()
     
     if not await client.is_user_authorized():
-        print(f"📡 Запрашиваю код для {PHONE}...")
-        await client.send_code_request(PHONE)
+        print(f"Авторизация для номера: {PHONE}")
         
-        # Ждем, пока ты впишешь код в Render
-        while not os.environ.get('TG_CODE'):
-            print("⏳ Жду код в переменной TG_CODE на Render...")
-            await asyncio.sleep(15)
+        # Если в переменной TG_CODE пусто, мы просто ждем и НЕ запрашиваем код
+        if not TG_CODE or TG_CODE == "":
+            print("ОЖИДАНИЕ: Впиши код в переменную TG_CODE в настройках Render и нажми Deploy.")
+            return # Останавливаем выполнение, чтобы не спамить запросами
         
         try:
-            code = os.environ.get('TG_CODE').strip()
-            await client.sign_in(PHONE, code)
-            print("✅ Вход выполнен!")
+            # Пытаемся зайти с тем кодом, который ты вписал
+            await client.sign_in(PHONE, TG_CODE)
+            print("✅ Успешный вход!")
         except Exception as e:
-            print(f"❌ Ошибка: {e}")
+            print(f"❌ Ошибка входа (возможно код устарел): {e}")
+            # Если код не подошел, запрашиваем НОВЫЙ только один раз
+            await client.send_code_request(PHONE)
+            print("⚠️ Запрошен НОВЫЙ код. Получи его в Telegram, обнови TG_CODE и перезапусти Deploy.")
             return
 
-    print("🚀 Аарон полностью запущен!")
+    print("🚀 Аарон в сети и готов к работе!")
+    
+    @client.on(events.NewMessage(pattern=r'^\.$', outgoing=True))
+    async def handler(event):
+        await event.delete()
+        await event.respond("✅ Аарон в сети! Все системы работают в облаке.")
+
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
