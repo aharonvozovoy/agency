@@ -4,60 +4,50 @@ from telethon import TelegramClient, events
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
 
-# --- ТВОИ ДАННЫЕ ---
+# --- ДАННЫЕ ---
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
 PHONE = '+66618169428'
-
-# Берем код из переменных Render
 TG_CODE = os.environ.get('TG_CODE')
 
-# Новое имя сессии для чистого запуска
-client = TelegramClient('session_v2', API_ID, API_HASH)
+client = TelegramClient('session_v3', API_ID, API_HASH)
 
-# Веб-сервер для Render (порт 8080)
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Aaron is alive")
+        self.wfile.write(b"Waiting for code...")
     def log_message(self, format, *args): return
 
 def run_web_server():
-    port = 8080
-    server = HTTPServer(('0.0.0.0', port), HealthHandler)
-    print(f"--- ВЕБ-СЕРВЕР ПОДНЯТ НА ПОРТУ {port} ---")
+    server = HTTPServer(('0.0.0.0', 8080), HealthHandler)
     server.serve_forever()
 
-# ОБРАБОТЧИК СООБЩЕНИЙ
 @client.on(events.NewMessage(outgoing=True))
 async def action_handler(event):
     if event.raw_text == '.':
-        print(">>> ТОЧКА ОБНАРУЖЕНА!")
-        await event.edit("🚀 **Аарон работает!**\nСессия v2 активна.")
+        await event.edit("🚀 **Аарон в сети!**")
 
 async def main():
-    print("--- ПОДКЛЮЧЕНИЕ К TELEGRAM ---")
+    print("--- ЗАПУСК СИСТЕМЫ ---")
     await client.connect()
     
-    authorized = await client.is_user_authorized()
-    
-    if not authorized:
-        if not TG_CODE or TG_CODE.strip() == "":
-            print(">>> ШАГ 1: Запрашиваю НОВЫЙ код в Telegram...")
+    if not await client.is_user_authorized():
+        if not TG_CODE:
+            print(">>> ШАГ 1: ЗАПРОС КОДА (ОДНОКРАТНО) <<<")
             await client.send_code_request(PHONE)
-            print("✅ КОД ОТПРАВЛЕН! Впиши его в TG_CODE в Render и нажми Save.")
+            print("✅ КОД ОТПРАВЛЕН! У тебя есть 10 минут, чтобы ввести его в TG_CODE.")
+            # ЗАМИРАЕМ, чтобы Render не перезапускал бота
+            await asyncio.sleep(600) 
         else:
-            print(f">>> ШАГ 2: Пробую войти с кодом: {TG_CODE}")
+            print(f">>> ШАГ 2: ВХОД С КОДОМ {TG_CODE} <<<")
             try:
                 await client.sign_in(PHONE, TG_CODE.strip())
-                print("✅✅✅ УСПЕХ! Аарон авторизован.")
+                print("✅✅✅ УСПЕХ! БОТ АВТОРИЗОВАН.")
             except Exception as e:
-                print(f"❌ ОШИБКА ВХОДА: {e}")
-                print("Совет: Очисти TG_CODE и попробуй снова.")
-                return
+                print(f"❌ ОШИБКА: {e}. Очисти TG_CODE и попробуй снова.")
     else:
-        print("✅ БОТ УЖЕ В СЕТИ")
+        print("✅ БОТ УЖЕ РАБОТАЕТ")
 
     await client.run_until_disconnected()
 
