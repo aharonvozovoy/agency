@@ -3,58 +3,40 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Твои данные
 API_ID = 30893125
 API_HASH = '5c73de68f3152f0513292cb495071e0b'
-PHONE = '+66618169428'
 
-# Проверка сессии
+# Берем сессию из настроек Render
 SESSION_STR = os.environ.get('TG_SESSION')
 
+# Простая заглушка для Render, чтобы он не выключал бота
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bot is waiting for session...")
+        self.wfile.write(b"Aaron is Online")
 
 async def main():
-    # Если сессия уже есть, просто запускаемся
-    if SESSION_STR:
-        client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
-        await client.start()
-        print("✅ ААРОН ЗАПУЩЕН ЧЕРЕЗ TG_SESSION")
-    else:
-        # Если сессии нет, создаем временного клиента для её получения
-        client = TelegramClient(StringSession(), API_ID, API_HASH)
-        await client.connect()
-        
-        print(">>> ШАГ 1: ЗАПРОС КОДА...")
-        sent = await client.send_code_request(PHONE)
-        
-        print("🆘 ВНИМАНИЕ: У тебя есть 5 минут! 🆘")
-        print("1. Дождись код в ТГ.")
-        print("2. Впиши его в TG_CODE в Render и нажми Save.")
-        
-        # Ждем появления кода в переменных среды БЕЗ перезапуска
-        for _ in range(60): 
-            await asyncio.sleep(10)
-            check_code = os.environ.get('TG_CODE')
-            if check_code:
-                print(f">>> ПРОБУЮ ВХОД С КОДОМ: {check_code}")
-                try:
-                    await client.sign_in(PHONE, check_code, phone_code_hash=sent.phone_code_hash)
-                    print("\n🔥 УСПЕХ! ТВОЯ СЕССИЯ НИЖЕ (СКОПИРУЙ ВСЁ): 🔥")
-                    print(client.session.save())
-                    print("\n-------------------------------------------")
-                    break
-                except Exception as e:
-                    print(f"❌ Ошибка: {e}")
+    if not SESSION_STR:
+        print("❌ ОШИБКА: Переменная TG_SESSION пуста!")
+        return
 
+    # Запуск через строку сессии
+    client = TelegramClient(StringSession(SESSION_STR), API_ID, API_HASH)
+    
     @client.on(events.NewMessage(outgoing=True))
     async def handler(event):
-        if event.raw_text == '.': await event.edit("🚀 Аарон в сети!")
+        if event.raw_text == '.': 
+            await event.edit("🚀 **Аарон в сети и готов к работе!**")
 
+    print("✅ Попытка подключения...")
+    await client.start()
+    print("✅ БОТ УСПЕШНО ЗАПУЩЕН!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
+    # Запуск веб-сервера в отдельном потоке
     threading.Thread(target=lambda: HTTPServer(('0.0.0.0', 8080), HealthHandler).serve_forever(), daemon=True).start()
+    # Запуск бота
     asyncio.run(main())
