@@ -1,0 +1,27 @@
+name: Trust Registry Hash Check
+
+on:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+  # Настройка окружения для запуска Python-скрипта хеширования
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Run Hashing Script
+      run: |
+        python update_registry.py
+
+    - name: Commit updated registry
+      uses: stefanzweifel/git-auto-commit-action@v4
+      with:
+        commit_message: "Auto-update trust registry hashes"
+        file_pattern: trust_registry.json
